@@ -17,7 +17,7 @@ from picamera2.outputs import FileOutput
 PAGE = """
 <html>
 <head>
-<title>rasp3-ubuntu-1</title>
+<title>rasp1-ubuntu-1</title>
 </head>
 <body>
 <img src="stream.mjpg" width="640" height="480" />
@@ -85,14 +85,14 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
 def draw_timestamp(request):
     """OpenCVを使い、エンコード直前のフレームに時刻を描画する"""
     colour = (0, 255, 0)
-    origin = (0, 30)
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 1
     thickness = 2
     timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
     with MappedArray(request, 'main') as m:
-        cv2.putText(m.array, timestamp, origin, font, scale, colour, thickness)
+        cv2.putText(m.array, timestamp, (260, 470), font, scale, colour, thickness)
+        cv2.putText(m.array, 'rasp1-ubuntu-1', (10, 30), font, scale, colour, thickness)
 
 # メイン処理
 picam2 = Picamera2()
