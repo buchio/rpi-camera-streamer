@@ -1,6 +1,9 @@
 import io
 import logging
+import socket
 import socketserver
+import sys
+
 from http import server
 from threading import Condition
 from datetime import datetime
@@ -13,11 +16,24 @@ from picamera2 import Picamera2, MappedArray
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
 
+
+port = 8080
+
+# Get current IP address
+connect_interface = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+connect_interface.connect(("8.8.8.8", 80))
+myip = connect_interface.getsockname()[0]
+connect_interface.close()
+
+message = 'TEST'
+if len(sys.argv) > 1:
+    message = sys.argv[1]
+
 # HTMLページの内容
-PAGE = """
+PAGE = f"""
 <html>
 <head>
-<title>rasp1-ubuntu-1</title>
+<title>{message}</title>
 </head>
 <body>
 <img src="stream.mjpg" width="640" height="480" />
@@ -84,15 +100,19 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
 # --- OpenCVを使ったコールバック関数 ---
 def draw_timestamp(request):
     """OpenCVを使い、エンコード直前のフレームに時刻を描画する"""
-    colour = (0, 255, 0)
+    c1 = (0, 0, 0)
+    c2 = (255, 255, 255)
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 1
-    thickness = 2
+    t1 = 5
+    t2 = 2
     timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
 
     with MappedArray(request, 'main') as m:
-        cv2.putText(m.array, timestamp, (260, 470), font, scale, colour, thickness)
-        cv2.putText(m.array, 'rasp1-ubuntu-1', (10, 30), font, scale, colour, thickness)
+        cv2.putText(m.array, timestamp, (260, 470), font, scale, c1, t1)
+        cv2.putText(m.array, timestamp, (260, 470), font, scale, c2, t2)
+        cv2.putText(m.array, message, (10, 30), font, scale, c1, t1)
+        cv2.putText(m.array, message, (10, 30), font, scale, c2, t2)
 
 # メイン処理
 picam2 = Picamera2()
@@ -109,9 +129,9 @@ output = StreamingOutput()
 picam2.start_recording(encoder, FileOutput(output))
 
 try:
-    address = ('', 8080)
+    address = ('', port)
     server = StreamingServer(address, StreamingHandler)
-    print("サーバーを開始しました。 http://<Raspberry PiのIPアドレス>:8080/index.html でアクセスしてください。")
+    print(f"サーバーを開始しました。 http://{myip}:{port}/index.html でアクセスしてください。")
     server.serve_forever()
 finally:
     picam2.stop_recording()
