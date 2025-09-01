@@ -3,8 +3,13 @@ import logging
 import socketserver
 from http import server
 from threading import Condition
+from datetime import datetime
 
-from picamera2 import Picamera2
+# OpenCVライブラリをインポート
+import cv2
+import numpy as np
+
+from picamera2 import Picamera2, MappedArray
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
 
@@ -76,13 +81,32 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+# --- OpenCVを使ったコールバック関数 ---
+def draw_timestamp(request):
+    """OpenCVを使い、エンコード直前のフレームに時刻を描画する"""
+    colour = (0, 255, 0)
+    origin = (0, 30)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 1
+    thickness = 2
+    timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+
+    with MappedArray(request, 'main') as m:
+        cv2.putText(m.array, timestamp, origin, font, scale, colour, thickness)
+
 # メイン処理
 picam2 = Picamera2()
 # ストリーミングに適した解像度に設定
-picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}))
+video_config = picam2.create_video_configuration(
+    main={"format": "XBGR8888", "size": (640, 480)},
+    controls={"FrameRate": 15}
+)
+picam2.configure(video_config)
+picam2.pre_callback = draw_timestamp
+encoder = JpegEncoder(q=70)
 output = StreamingOutput()
 # JpegEncoderを使い、FileOutputとしてoutputオブジェクトを指定
-picam2.start_recording(JpegEncoder(), FileOutput(output))
+picam2.start_recording(encoder, FileOutput(output))
 
 try:
     address = ('', 8080)
