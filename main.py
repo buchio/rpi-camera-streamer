@@ -55,6 +55,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_header('Pragma', 'no-cache')
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
             self.end_headers()
+            self.request.settimeout(5) # 5秒のタイムアウトを設定
             try:
                 while True:
                     with self.output.condition:
@@ -66,6 +67,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(frame)
                     self.wfile.write(b'\r\n')
+            except (socket.timeout, BrokenPipeError, ConnectionResetError) as e:
+                logging.info("Client disconnected: %s", self.client_address)
             except Exception as e:
                 logging.warning('Removed streaming client %s: %s', self.client_address, str(e))
         else:
