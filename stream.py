@@ -7,7 +7,7 @@ import cv2
 from datetime import datetime
 
 
-def def draw_overlay(frame, message=None):
+def draw_overlay(frame, message=None):
     """フレームにタイムスタンプとオプションのメッセージを描画する"""
     c1 = (0, 0, 0)      # 影用の黒
     c2 = (255, 255, 255) # テキスト用の白
