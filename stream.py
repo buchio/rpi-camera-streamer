@@ -3,6 +3,30 @@ import logging
 import socketserver
 from http import server
 from threading import Condition
+import cv2
+from datetime import datetime
+
+
+def def draw_overlay(frame, message=None):
+    """フレームにタイムスタンプとオプションのメッセージを描画する"""
+    c1 = (0, 0, 0)      # 影用の黒
+    c2 = (255, 255, 255) # テキスト用の白
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 1
+    t1 = 5 # 影の太さ
+    t2 = 2 # テキストの太さ
+
+    # タイムスタンプ (640x480解像度用の座標)
+    timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    ts_pos = (260, 470)
+    cv2.putText(frame, timestamp, ts_pos, font, scale, c1, t1)
+    cv2.putText(frame, timestamp, ts_pos, font, scale, c2, t2)
+
+    # オプションのメッセージ
+    if message:
+        msg_pos = (10, 30)
+        cv2.putText(frame, message, msg_pos, font, scale, c1, t1)
+        cv2.putText(frame, message, msg_pos, font, scale, c2, t2)
 
 class StreamingOutput(io.BufferedIOBase):
     def __init__(self):

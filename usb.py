@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 import socket
+import sys
 from threading import Thread
 from datetime import datetime
 import cv2
 import time
 
-from stream import StreamingServer, StreamingHandler, StreamingOutput
+from stream import StreamingServer, StreamingHandler, StreamingOutput, draw_overlay
 
 # --- Settings ---
 PORT = 8000
@@ -25,11 +26,15 @@ try:
 except OSError:
     myip = '127.0.0.1'
 
+message = 'USB Camera'
+if len(sys.argv) > 1:
+    message = sys.argv[1]
+
 # HTML page content
 PAGE = f"""
 <html>
 <head>
-<title>USB Camera Stream</title>
+<title>{message}</title>
 </head>
 <body>
 <img src="stream.mjpg" width="{FRAME_WIDTH}" height="{FRAME_HEIGHT}" />
@@ -60,11 +65,8 @@ def capture_loop(output):
             print("Error: Could not read frame.")
             continue
 
-        # Draw timestamp
-        timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        cv2.putText(img=frame, text=timestamp, org=(10, 20),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                    color=(255, 255, 255), thickness=1)
+        # Draw timestamp and message
+        draw_overlay(frame, message)
 
         # Encode frame to JPEG
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])

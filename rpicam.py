@@ -7,7 +7,7 @@ from picamera2 import Picamera2, MappedArray
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
 
-from stream import StreamingServer, StreamingHandler, StreamingOutput
+from stream import StreamingServer, StreamingHandler, StreamingOutput, draw_overlay
 
 PORT = 8080
 FRAME_WIDTH = 640
@@ -39,20 +39,9 @@ PAGE = f"""
 """
 
 def draw_timestamp(request):
-    """Draws a timestamp on the frame before encoding."""
-    c1 = (0, 0, 0)
-    c2 = (255, 255, 255)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 1
-    t1 = 5
-    t2 = 2
-    timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-
+    """pamera2のコールバック。共通の描画関数を呼び出す"""
     with MappedArray(request, 'main') as m:
-        cv2.putText(m.array, timestamp, (260, 470), font, scale, c1, t1)
-        cv2.putText(m.array, timestamp, (260, 470), font, scale, c2, t2)
-        cv2.putText(m.array, message, (10, 30), font, scale, c1, t1)
-        cv2.putText(m.array, message, (10, 30), font, scale, c2, t2)
+        draw_overlay(m.array, message)
 
 if __name__ == '__main__':
     picam2 = Picamera2()
