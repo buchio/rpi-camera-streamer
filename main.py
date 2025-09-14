@@ -167,7 +167,7 @@ audio_buffer = StreamBuffer()
 
 @app.route('/')
 def index():
-    use_audio = args.camera_type == 'usb' and SOUNDDEVICE_AVAILABLE
+    use_audio = args.enable_audio and SOUNDDEVICE_AVAILABLE
     return render_template_string('''
         <html>
         <head>
@@ -204,8 +204,8 @@ def video_feed():
 
 @app.route('/audio_feed')
 def audio_feed():
-    if args.camera_type != 'usb' or not SOUNDDEVICE_AVAILABLE:
-        return "Audio stream not available for this configuration.", 404
+    if not args.enable_audio or not SOUNDDEVICE_AVAILABLE:
+        return "Audio stream not available or not enabled.", 404
     return Response(gen_audio(), mimetype='audio/wav')
 
 
@@ -225,7 +225,8 @@ if __name__ == '__main__':
     parser.add_argument('--quality', type=int, default=70, help='JPEG quality (1-100).')
     # USB Specific
     parser.add_argument('--device-id', type=int, default=0, help='USB camera device ID.')
-    # Audio Specific (for USB mode)
+    # Audio Specific
+    parser.add_argument('--enable-audio', action='store_true', help='Enable audio streaming.')
     parser.add_argument('--audio-samplerate', type=int, default=44100, help='Audio sample rate in Hz.')
     parser.add_argument('--audio-channels', type=int, default=1, help='Number of audio channels.')
     parser.add_argument('--audio-duration', type=int, default=100, help='Audio chunk duration in ms.')
@@ -243,11 +244,13 @@ if __name__ == '__main__':
         args.message = args.message if args.message != 'Camera Stream' else 'USB Camera'
         video_thread = Thread(target=usb_video_capture_thread, args=(video_buffer, args), daemon=True)
         video_thread.start()
+
+    if args.enable_audio:
         if SOUNDDEVICE_AVAILABLE:
             audio_thread = Thread(target=audio_capture_thread, args=(audio_buffer, args), daemon=True)
             audio_thread.start()
         else:
-            logging.warning("Audio libraries not found, continuing without audio.")
+            logging.warning("Audio libraries not found, audio streaming disabled.")
 
     # Get local IP address for display
     try:
@@ -258,7 +261,7 @@ if __name__ == '__main__':
         myip = '127.0.0.1'
 
     logging.info(f"Server starting on http://{myip}:{args.port}")
-    if args.camera_type == 'usb' and SOUNDDEVICE_AVAILABLE:
+    if args.enable_audio and SOUNDDEVICE_AVAILABLE:
         logging.info("Audio streaming is enabled on /audio_feed")
 
     # Run Flask app
