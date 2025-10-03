@@ -224,7 +224,7 @@ def index():
             <img src="{{ url_for('video_feed') }}" width="{{ width }}" height="{{ height }}">
             {% if use_audio %}
                 <h2>Audio Stream</h2>
-                <audio autoplay>
+                <audio controls autoplay>
                     <source src="{{ url_for('audio_feed') }}" type="audio/wav">
                     Your browser does not support the audio element.
                 </audio>
