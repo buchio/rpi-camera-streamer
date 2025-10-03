@@ -183,10 +183,10 @@ def audio_capture_thread(buffer, args):
             if status:
                 logging.warning(status)
             
-            # Calculate RMS audio level
-            rms = np.sqrt(np.mean(indata**2)) if indata.size > 0 else 0.0
+            # Calculate RMS audio level (convert to float32 to avoid overflow)
+            rms = np.sqrt(np.mean(indata.astype(np.float32)**2)) if indata.size > 0 else 0.0
             with current_audio_level['lock']:
-                current_audio_level['value'] = rms
+                current_audio_level['value'] = rms / 32768.0 # Normalize to 0.0-1.0
 
             # Put raw PCM data into the buffer
             buffer.write(indata.tobytes())
@@ -196,6 +196,7 @@ def audio_capture_thread(buffer, args):
             samplerate=samplerate,
             channels=channels,
             blocksize=blocksize,
+            dtype='int16', # Use 16-bit integers for WAV compatibility
             callback=callback
         ):
             while True:
@@ -210,6 +211,7 @@ video_buffer = StreamBuffer()
 audio_buffer = StreamBuffer()
 
 @app.route('/')
+@app.route('/index.html')
 def index():
     use_audio = args.enable_audio and SOUNDDEVICE_AVAILABLE
     return render_template_string('''
