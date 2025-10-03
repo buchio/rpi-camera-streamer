@@ -185,11 +185,18 @@ def audio_capture_thread(buffer, args):
             
             # Calculate RMS audio level (convert to float32 to avoid overflow)
             rms = np.sqrt(np.mean(indata.astype(np.float32)**2)) if indata.size > 0 else 0.0
-            with current_audio_level['lock']:
-                current_audio_level['value'] = rms / 32768.0 # Normalize to 0.0-1.0
+            normalized_rms = rms / 32768.0 # Normalize to 0.0-1.0
 
-            # Put raw PCM data into the buffer
-            buffer.write(indata.tobytes())
+            with current_audio_level['lock']:
+                current_audio_level['value'] = normalized_rms
+
+            # Apply noise gate if enabled
+            if args.audio_noise_gate > 0 and normalized_rms < args.audio_noise_gate:
+                # If audio level is below threshold, send silence
+                buffer.write(np.zeros_like(indata).tobytes())
+            else:
+                # Otherwise, send the original audio
+                buffer.write(indata.tobytes())
 
         with sd.InputStream(
             device=args.audio_device,
@@ -308,6 +315,7 @@ if __name__ == '__main__':
     parser.add_argument('--audio-samplerate', type=int, default=44100, help='Audio sample rate in Hz.')
     parser.add_argument('--audio-channels', type=int, default=1, help='Number of audio channels.')
     parser.add_argument('--audio-duration', type=int, default=100, help='Audio chunk duration in ms.')
+    parser.add_argument('--audio-noise-gate', type=float, default=0.0, help='Noise gate threshold (0.0-1.0). Suppresses audio below this volume. Default is 0.0 (disabled).')
 
     args = parser.parse_args()
 
