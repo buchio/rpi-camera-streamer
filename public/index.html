@@ -1,0 +1,116 @@
+
+<html>
+<head>
+    <title>WebSocket Media Stream</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #222; color: #eee; }
+        #video-container { position: relative; }
+        #video { background: #000; min-width: 640px; min-height: 480px; border: 1px solid #444; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; display: flex; justify-content: center; align-items: center; cursor: pointer; font-size: 1.5em; }
+        #log { width: 640px; height: 200px; overflow-y: scroll; border: 1px solid #444; background: #333; padding: 5px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Media Stream</h1>
+    <div id="video-container">
+        <img id="video" src="" width="640" height="480">
+        <div id="overlay">Click to Start Audio</div>
+    </div>
+    <h3>Log</h3>
+    <div id="log"></div>
+    <script>
+        const video = document.getElementById('video');
+        const logDiv = document.getElementById('log');
+        const overlay = document.getElementById('overlay');
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+        
+        function log(message) {
+            const p = document.createElement('p');
+            p.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(p);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        let audioQueue = [];
+        let nextPlayTime = 0;
+        let isPlaying = false;
+        const scheduleAheadTime = 0.2;
+
+        function schedulePlayback() {
+            while (audioQueue.length > 0 && nextPlayTime < audioCtx.currentTime + scheduleAheadTime) {
+                const audioBuffer = audioQueue.shift();
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+
+                if (nextPlayTime < audioCtx.currentTime) {
+                    nextPlayTime = audioCtx.currentTime;
+                }
+
+                source.start(nextPlayTime);
+                nextPlayTime += audioBuffer.duration;
+            }
+        }
+
+        function initializeAudio() {
+            const startPlaybackLoop = () => {
+                if (!isPlaying) {
+                    isPlaying = true;
+                    setInterval(schedulePlayback, 50);
+                    log('Audio playback scheduler started.');
+                }
+            };
+
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().then(() => {
+                    log('Audio context resumed.');
+                    startPlaybackLoop();
+                }).catch(e => log(`Audio context resume failed: ${e}`));
+            } else {
+                startPlaybackLoop();
+            }
+            overlay.style.display = 'none';
+        }
+        overlay.addEventListener('click', initializeAudio, { once: true });
+
+        const socket = new WebSocket(`ws://localhost:8080/stream`);
+
+        socket.onopen = () => log('WebSocket connection established.');
+        socket.onclose = () => log('WebSocket connection closed.');
+        socket.onerror = (err) => log(`WebSocket error: ${err}`);
+
+        socket.onmessage = (event) => {
+            const parts = event.data.split(':');
+            const type = parts[0];
+            const timestamp = parseFloat(parts[1]);
+            const data = parts[2];
+
+            if (type === 'video') {
+                video.src = 'data:image/jpeg;base64,' + data;
+            } else if (type === 'audio') {
+                const binaryString = atob(data);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Use DataView for robust little-endian decoding
+                const dataView = new DataView(bytes.buffer);
+                const float32Array = new Float32Array(len / 2);
+                for (let i = 0; i < float32Array.length; i++) {
+                    // (byteOffset, littleEndian)
+                    const int16 = dataView.getInt16(i * 2, true); 
+                    float32Array[i] = int16 / 32768.0;
+                }
+
+                const audioBuffer = audioCtx.createBuffer(1, float32Array.length, audioCtx.sampleRate);
+                audioBuffer.copyToChannel(float32Array, 0);
+                audioQueue.push(audioBuffer);
+            }
+        };
+
+        log('Client initialized.');
+    </script>
+</body>
+</html>
