@@ -9,6 +9,15 @@ except (ImportError, OSError):
     SOUNDDEVICE_AVAILABLE = False
 
 
+def add_audio_args(parser):
+    parser.add_argument('--enable-audio', action='store_true')
+    parser.add_argument('--audio-device', type=int, default=None)
+    parser.add_argument('--audio-channels', type=int, default=1,
+                        help="Number of audio channels (1=mono).")
+    parser.add_argument('--audio-samplerate', type=int, default=None,
+                        help="Audio sample rate in Hz. Defaults to device default.")
+
+
 def audio_capture_thread(args, combined_queue):
     if not SOUNDDEVICE_AVAILABLE:
         logging.error(

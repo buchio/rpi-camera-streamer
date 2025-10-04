@@ -13,6 +13,16 @@ except ImportError:
     PICAMERA2_AVAILABLE = False
 
 
+def add_video_args(parser):
+    parser.add_argument('--camera-type', type=str,
+                        required=True, choices=['rpi', 'usb'])
+    parser.add_argument('--width', type=int, default=640)
+    parser.add_argument('--height', type=int, default=480)
+    parser.add_argument('--fps', type=int, default=15)
+    parser.add_argument('--quality', type=int, default=70)
+    parser.add_argument('--device-id', type=int, default=0)
+
+
 def video_capture_thread(args, combined_queue):
     logging.info(f"Starting video capture with type: {args.camera_type}")
     if args.camera_type == 'rpi':
