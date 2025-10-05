@@ -5,7 +5,7 @@
     <style>
         body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #222; color: #eee; }
         #video-container { position: relative; width: 100%; max-width: 640px; }
-        #video { width: 100%; height: auto; background: #000; border: 1px solid #444; display: block; }
+        #video-canvas { width: 100%; height: auto; background: #000; border: 1px solid #444; display: block; }
         #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; display: flex; justify-content: center; align-items: center; cursor: pointer; font-size: 1.5em; }
         #log { width: 640px; height: 200px; overflow-y: scroll; border: 1px solid #444; background: #333; padding: 5px; font-family: monospace; }
     </style>
@@ -13,7 +13,7 @@
 <body>
     <h1>WebSocket Media Stream</h1>
     <div id="video-container">
-        <img id="video" src="">
+        <canvas id="video-canvas"></canvas>
         <div id="overlay">Click to Start Audio</div>
     </div>
     <div id="timestamps">
@@ -24,7 +24,8 @@
     <h3>Log</h3>
     <div id="log"></div>
     <script>
-        const video = document.getElementById('video');
+        const canvas = document.getElementById('video-canvas');
+        const ctx = canvas.getContext('2d');
         const logDiv = document.getElementById('log');
         const overlay = document.getElementById('overlay');
         const videoTimestampSpan = document.getElementById('video-timestamp');
@@ -39,6 +40,7 @@
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
+        // --- Audio Playback Logic ---
         let audioQueue = [];
         let nextPlayTime = 0;
         let isPlaying = false;
@@ -50,11 +52,9 @@
                 const source = audioCtx.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(audioCtx.destination);
-
                 if (nextPlayTime < audioCtx.currentTime) {
                     nextPlayTime = audioCtx.currentTime;
                 }
-
                 source.start(nextPlayTime);
                 nextPlayTime += audioBuffer.duration;
             }
@@ -68,7 +68,6 @@
                     log('Audio playback scheduler started.');
                 }
             };
-
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume().then(() => {
                     log('Audio context resumed.');
@@ -81,6 +80,7 @@
         }
         overlay.addEventListener('click', initializeAudio, { once: true });
 
+        // --- WebSocket and Rendering Logic ---
         const socket = new WebSocket(`ws://localhost:8080/stream`);
 
         socket.onopen = () => log('WebSocket connection established.');
@@ -97,14 +97,20 @@
                 const height = parseInt(parts[3], 10);
                 const data = parts[4];
 
-                video.style.aspectRatio = width + ' / ' + height;
-                video.src = 'data:image/jpeg;base64,' + data;
+                const image = new Image();
+                image.onload = function() {
+                    if (canvas.width !== image.width || canvas.height !== image.height) {
+                        canvas.width = image.width;
+                        canvas.height = image.height;
+                        canvas.style.aspectRatio = image.width + ' / ' + image.height;
+                    }
+                    ctx.drawImage(image, 0, 0);
+                };
+                image.src = 'data:image/jpeg;base64,' + data;
+
+                // Update info display
                 videoTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    fractionalSecondDigits: 3
+                    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
                 });
                 videoResolutionSpan.innerText = `${width} x ${height}`;
 
@@ -113,11 +119,7 @@
                 const data = parts[2];
 
                 audioTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    fractionalSecondDigits: 3
+                    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
                 });
 
                 const binaryString = atob(data);
@@ -127,11 +129,9 @@
                     bytes[i] = binaryString.charCodeAt(i);
                 }
 
-                // Use DataView for robust little-endian decoding
                 const dataView = new DataView(bytes.buffer);
                 const float32Array = new Float32Array(len / 2);
                 for (let i = 0; i < float32Array.length; i++) {
-                    // (byteOffset, littleEndian)
                     const int16 = dataView.getInt16(i * 2, true); 
                     float32Array[i] = int16 / 32768.0;
                 }

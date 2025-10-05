@@ -1,9 +1,10 @@
-
 import io
 import time
 import logging
-import cv2
+import subprocess
+import re
 
+# --- Conditional Imports ---
 try:
     from picamera2 import Picamera2
     from picamera2.encoders import JpegEncoder
@@ -12,36 +13,38 @@ try:
 except ImportError:
     PICAMERA2_AVAILABLE = False
 
+try:
+    import v4l2
+    import fcntl
+    import mmap
+    import ctypes
+    from select import select
+    PYV4L2_AVAILABLE = True
+except ImportError:
+    PYV4L2_AVAILABLE = False
 
-import subprocess
-import re
+# --- Argument Parsing ---
 
 
 def add_video_args(parser):
-    parser.add_argument('--camera-type', type=str,
-                        required=True, choices=['rpi', 'usb'])
-    # Output arguments
+    parser.add_argument('--camera-type', type=str, required=True,
+                        choices=['rpi', 'usb'], help="Type of camera to use.")
     parser.add_argument('--width', type=int, default=640,
-                        help="Final output width.")
+                        help="Width for video capture.")
     parser.add_argument('--height', type=int, default=480,
-                        help="Final output height.")
-
-    # Capture arguments (for USB cameras)
-    parser.add_argument('--capture-width', type=int, default=None,
-                        help="[USB only] Width for capturing from the camera.")
-    parser.add_argument('--capture-height', type=int, default=None,
-                        help="[USB only] Height for capturing from the camera.")
-
+                        help="Height for video capture.")
     parser.add_argument('--fps', type=int, default=15,
                         help="Frames per second.")
     parser.add_argument('--quality', type=int, default=70,
-                        help="JPEG encoding quality (1-100).")
+                        help="JPEG encoding quality (for RPi camera).")
     parser.add_argument('--device-id', type=int, default=0,
-                        help="USB camera device ID.")
+                        help="USB camera device ID (e.g., 0 for /dev/video0).")
+
+# --- Logging Helpers ---
 
 
 def _log_rpi_camera_modes():
-    "Logs the sensor modes available for a picamera2 device."
+    """Logs the sensor modes available for a picamera2 device."""
     if not PICAMERA2_AVAILABLE:
         return
     try:
@@ -50,13 +53,13 @@ def _log_rpi_camera_modes():
         for mode in picam2.sensor_modes:
             logging.info(mode)
         logging.info("--------------------------------")
-        picam2.close()  # Close the camera after getting modes
+        picam2.close()
     except Exception as e:
         logging.warning(f"Could not enumerate RPi camera modes: {e}")
 
 
 def _log_usb_camera_formats(device_id):
-    "Logs supported formats and resolutions for a USB camera using v4l2-ctl."
+    """Logs supported formats and resolutions for a USB camera using v4l2-ctl."""
     device_path = f"/dev/video{device_id}"
     logging.info(
         f"--- USB Camera Supported Formats for {device_path} (via v4l2-ctl) ---")
@@ -66,7 +69,6 @@ def _log_usb_camera_formats(device_id):
             capture_output=True, text=True, check=True
         )
         output = result.stdout
-        # Log the relevant lines for formats and sizes
         for line in output.split('\n'):
             line = line.strip()
             if line.startswith('[') or line.startswith('Size: Discrete'):
@@ -83,27 +85,119 @@ def _log_usb_camera_formats(device_id):
         logging.warning(
             f"An unexpected error occurred while checking USB formats: {e}")
 
+# --- V4L2 Capture Process (for USB) ---
 
-def video_capture_process(args, video_queue):
-    logging.info(f"Starting video capture with type: {args.camera_type}")
 
-    # Log supported formats before starting the capture
-    if args.camera_type == 'rpi':
-        _log_rpi_camera_modes()
-    elif args.camera_type == 'usb':
-        _log_usb_camera_formats(args.device_id)
+def _v4l2_capture(args, video_queue):
+    if not PYV4L2_AVAILABLE:
+        logging.error(
+            "pyv4l2 library is not installed. USB camera stream will not start.")
+        return
 
-    if args.camera_type == 'rpi':
-        if not PICAMERA2_AVAILABLE:
-            logging.error(
-                "picamera2 library not found. Raspberry Pi camera stream will not start.")
+    device_path = f"/dev/video{args.device_id}"
+    buffers = []
+    device = None
+    try:
+        device = open(device_path, 'rb+', buffering=0)
+
+        caps = v4l2.v4l2_capability()
+        fcntl.ioctl(device, v4l2.VIDIOC_QUERYCAP, caps)
+        if not (caps.capabilities & v4l2.V4L2_CAP_VIDEO_CAPTURE):
+            logging.error(f"{device_path} does not support video capture.")
             return
-        picam2 = Picamera2()
+        if not (caps.capabilities & v4l2.V4L2_CAP_STREAMING):
+            logging.error(f"{device_path} does not support streaming.")
+            return
+
+        fmt = v4l2.v4l2_format()
+        fmt.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        fmt.fmt.pix.width = args.width
+        fmt.fmt.pix.height = args.height
+        fmt.fmt.pix.pixelformat = v4l2.V4L2_PIX_FMT_MJPEG
+        fmt.fmt.pix.field = v4l2.V4L2_FIELD_ANY
+        try:
+            fcntl.ioctl(device, v4l2.VIDIOC_S_FMT, fmt)
+        except OSError as e:
+            if e.errno == 22:  # Invalid argument
+                logging.error(
+                    f"Failed to set format to MJPEG {args.width}x{args.height}.")
+                logging.error(
+                    "The camera may not support this format or resolution.")
+                logging.error(
+                    "Please check the output of 'v4l2-ctl --list-formats-ext' for supported modes.")
+                return
+            else:
+                raise
+
+        actual_width = fmt.fmt.pix.width
+        actual_height = fmt.fmt.pix.height
+        if actual_width != args.width or actual_height != args.height:
+            logging.warning(
+                f"Resolution was adjusted by driver to {actual_width}x{actual_height}")
+
+        req = v4l2.v4l2_requestbuffers()
+        req.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+        req.count = 4
+        req.memory = v4l2.V4L2_MEMORY_MMAP
+        fcntl.ioctl(device, v4l2.VIDIOC_REQBUFS, req)
+
+        for i in range(req.count):
+            buf = v4l2.v4l2_buffer()
+            buf.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+            buf.memory = v4l2.V4L2_MEMORY_MMAP
+            buf.index = i
+            fcntl.ioctl(device, v4l2.VIDIOC_QUERYBUF, buf)
+            mm = mmap.mmap(device.fileno(), buf.length, mmap.MAP_SHARED,
+                           mmap.PROT_READ | mmap.PROT_WRITE, offset=buf.m.offset)
+            buffers.append(mm)
+            fcntl.ioctl(device, v4l2.VIDIOC_QBUF, buf)
+
+        buf_type = ctypes.c_int(v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE)
+        fcntl.ioctl(device, v4l2.VIDIOC_STREAMON, buf_type)
+        logging.info(
+            f"V4L2 capture started on {device_path} at {actual_width}x{actual_height}")
+
+        while True:
+            r, _, _ = select([device], [], [])
+            if device in r:
+                buf = v4l2.v4l2_buffer()
+                buf.type = v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE
+                buf.memory = v4l2.V4L2_MEMORY_MMAP
+                fcntl.ioctl(device, v4l2.VIDIOC_DQBUF, buf)
+                jpeg_data = buffers[buf.index].read(buf.bytesused)
+                buffers[buf.index].seek(0)
+                if not video_queue.full():
+                    video_queue.put(
+                        ('video', time.time(), actual_width, actual_height, jpeg_data))
+                fcntl.ioctl(device, v4l2.VIDIOC_QBUF, buf)
+
+    except (IOError, OSError) as e:
+        logging.error(f"V4L2 Error: {e}")
+    finally:
+        if device:
+            try:
+                buf_type = ctypes.c_int(v4l2.V4L2_BUF_TYPE_VIDEO_CAPTURE)
+                fcntl.ioctl(device, v4l2.VIDIOC_STREAMOFF, buf_type)
+            except (IOError, OSError):
+                pass
+            for mm in buffers:
+                mm.close()
+            device.close()
+        logging.info("V4L2 capture stopped.")
+
+# --- RPi Camera Capture Process ---
+
+
+def _rpi_capture(args, video_queue):
+    if not PICAMERA2_AVAILABLE:
+        logging.error(
+            "picamera2 library not found. Raspberry Pi camera stream will not start.")
+        return
+    picam2 = Picamera2()
+    try:
         video_config = picam2.create_video_configuration(main={"format": "XBGR8888", "size": (
             args.width, args.height)}, controls={"FrameRate": args.fps})
         picam2.configure(video_config)
-
-        # Get the actual resolution from the camera configuration
         actual_config = picam2.camera_configuration()
         actual_width = actual_config['main']['size'][0]
         actual_height = actual_config['main']['size'][1]
@@ -113,73 +207,33 @@ def video_capture_process(args, video_queue):
         encoder = JpegEncoder(q=args.quality)
         output = io.BytesIO()
         picam2.start_recording(encoder, FileOutput(output))
-        try:
-            while True:
-                picam2.wait_recording(1)
-                timestamp = time.time()
-                frame_data = output.getvalue()
-                output.seek(0)
-                output.truncate()
-                if not video_queue.full():
-                    video_queue.put(
-                        ('video', timestamp, actual_width, actual_height, frame_data))
-                else:
-                    logging.warning(
-                        "Video queue full, dropping video frame.")
-        finally:
-            picam2.stop_recording()
 
-    elif args.camera_type == 'usb':
-        # Determine capture resolution, fallback to output resolution if not specified
-        capture_width = args.capture_width if args.capture_width is not None else args.width
-        capture_height = args.capture_height if args.capture_height is not None else args.height
-
-        cap = cv2.VideoCapture(args.device_id, cv2.CAP_V4L2)
-        if not cap.isOpened():
-            return logging.error(f"Could not open camera device ID {args.device_id}.")
-
-        # Set capture resolution and check if it was successful
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_height)
-        cap.set(cv2.CAP_PROP_FPS, args.fps)
-
-        actual_capture_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_capture_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        if actual_capture_width != capture_width or actual_capture_height != capture_height:
-            logging.warning(
-                f"Failed to set capture resolution to {capture_width}x{capture_height}. "
-                f"The camera may not support this resolution or it may have been adjusted."
-            )
-        logging.info(
-            f"USB camera started with actual capture resolution: {actual_capture_width}x{actual_capture_height}")
-
-        wait_time = 1.0 / args.fps
         while True:
-            start_time = time.time()
-            ret, frame = cap.read()
+            picam2.wait_recording(1)
             timestamp = time.time()
-            if not ret:
-                continue
+            frame_data = output.getvalue()
+            output.seek(0)
+            output.truncate()
+            if not video_queue.full():
+                video_queue.put(
+                    ('video', timestamp, actual_width, actual_height, frame_data))
+            else:
+                logging.warning("Video queue full, dropping video frame.")
+    finally:
+        if picam2.is_open:
+            picam2.stop_recording()
+        picam2.close()
+        logging.info("RPi camera capture stopped.")
 
-            # Resize frame if output size is different from capture size
-            output_width = args.width
-            output_height = args.height
-            if frame.shape[1] != output_width or frame.shape[0] != output_height:
-                frame = cv2.resize(
-                    frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
+# --- Main Process Function ---
 
-            ret, encoded_frame = cv2.imencode(
-                '.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), args.quality])
 
-            if ret:
-                if not video_queue.full():
-                    # Send the final output dimensions
-                    video_queue.put(
-                        ('video', timestamp, output_width, output_height, encoded_frame.tobytes()))
-                else:
-                    logging.warning(
-                        "Video queue full, dropping video frame.")
-            elapsed = time.time() - start_time
-            if wait_time > elapsed:
-                time.sleep(wait_time - elapsed)
+def video_capture_process(args, video_queue):
+    logging.info(f"Starting video capture with type: {args.camera_type}")
+
+    if args.camera_type == 'rpi':
+        _log_rpi_camera_modes()
+        _rpi_capture(args, video_queue)
+    elif args.camera_type == 'usb':
+        _log_usb_camera_formats(args.device_id)
+        _v4l2_capture(args, video_queue)
