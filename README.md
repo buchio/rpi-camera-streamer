@@ -9,10 +9,24 @@ Raspberry Piに接続されたカメラモジュールまたはUSBウェブカ�
 ## 主な機能
 
 -   **WebSocketベースのストリーミング**: HTTPストリーミングに比べ、より低遅延でリアルタイム性の高い通信を実現します。
--   **タイムスタンプ埋め込み**: 映像・音声の各データパケットにUNIXタイムスタンプが付与され、プログラムでの同期処理や分析に利用できます。
+-   **プロセスベースのキャプチャ**: CPU負荷の高い映像・音声のキャプチャ処理を別々のプロセスで実行するため、メインのWebサーバーへの影響を最小限に抑え、安定した動作を実現します。
+-   **タイムスタンプと解像度の埋め込み**: 映像・音声の各データパケットにUNIXタイムスタンプが付与されます。特に映像データには、フレームごとの解像度（幅・高さ）情報も含まれます。
 -   **デュアルカメラ対応**: Raspberry Piカメラモジュール (`picamera2`経由) とUSBウェブカメラ (`OpenCV`経由) の両方で動作します。
 -   **音声ストリーミング**: マイクが接続されていれば、映像と同時に音声もストリーミングできます (`sounddevice`経由)。
--   **モダンなクライアント**: 受信したデータを動的に処理する、単一ページのJavaScriptアプリケーションとして動作します。
+-   **サーバーから分離されたクライアント**: サーバーはデータ配信に専念し、クライアントは `public` ディレクトリ内のHTML/JavaScriptファイルとして完全に分離されています。
+
+## プロジェクト構造
+
+```
+/
+├── rpi_camera_streamer/    # アプリケーションのメインパッケージ
+│   ├── main.py             # Flaskサーバー、スレッド/プロセス管理
+│   ├── video.py            # 映像キャプチャプロセス
+│   └── audio.py            # 音声キャプチャプロセス
+├── public/                 # クライアントサイドのファイル
+│   └── index.html          # ストリームを閲覧するためのHTMLファイル
+└── run.py                  # アプリケーションを起動するためのスクリプト
+```
 
 ## 依存関係のインストール
 
@@ -33,63 +47,86 @@ pip install picamera2
 
 ## 実行方法
 
-`main.py` スクリプトに、必須の `--camera-type` 引数を付けて実行します。サーバーは単一のポートで、映像・音声・Webページのすべてを配信します。
+プロジェクトのルートディレクトリで `run.py` スクリプトを実行します。
 
-#### Raspberry Piカメラからストリーミング (映像と音声)
+#### 1. サーバーを起動する
 
+ターミナルで、必須の `--camera-type` 引数を付けて `run.py` を実行します。
+
+**Raspberry Piカメラからストリーミング (映像と音声):**
 ```bash
-python3 main.py --camera-type rpi --enable-audio
+python3 run.py --camera-type rpi --enable-audio
 ```
 
-#### USBウェブカメラからストリーミング (映像と音声)
-
+**USBウェブカメラからストリーミング (映像と音声):**
 ```bash
-python3 main.py --camera-type usb --enable-audio
+python3 run.py --camera-type usb --enable-audio
 ```
 
-スクリプト起動後、Webブラウザで `http://<あなたのPiのIPアドレス>:8080` にアクセスしてください。
+#### 2. クライアントを開く
 
-**注意:** 初回アクセス時、音声の再生を開始するには、ブラウザの自動再生ポリシーにより、画面に表示される「Click to Start Audio」というメッセージをクリックする必要があります。
+Webブラウザで、プロジェクト内の `public/index.html` ファイルを直接開きます。（サーバーはHTMLを配信しません）
+
+**注意:** 
+- 初回アクセス時、音声の再生を開始するには、ブラウザの自動再生ポリシーにより、画面に表示される「Click to Start Audio」というメッセージをクリックする必要があります。
+- サーバーと異なるマシンでクライアントを開く場合、`index.html`内の `const socket = new WebSocket(...)` のURLを、サーバーのIPアドレス（例: `ws://192.168.1.10:8080/stream`）に手動で変更する必要があります。
 
 ## 開発者向け情報: データフォーマット
 
 WebSocket (`/stream`) を通じて、サーバーからクライアントへ以下の形式のテキストメッセージが送信されます。
 
-```
-<type>:<timestamp>:<data>
-```
+#### ビデオデータ
+`video:<timestamp>:<width>:<height>:<data>`
 
--   **`<type>`**: データの種類。`video` または `audio` のいずれか。
--   **`<timestamp>`**: データがサーバーでキャプチャされたUNIXタイムスタンプ (浮動小数点数)。
--   **`<data>`**: メディアデータをBase64エンコードした文字列。
-    -   `video`の場合: JPEG画像データ
-    -   `audio`の場合: 16ビット符号付き整数・リトルエンディアンの生PCMデータ
+-   **`<type>`**: `video`
+-   **`<timestamp>`**: キャプチャ時のUNIXタイムスタンプ (浮動小数点数)。
+-   **`<width>`**: 画像の幅 (整数)。
+-   **`<height>`**: 画像の高さ (整数)。
+-   **`<data>`**: JPEG画像データをBase64エンコードした文字列。
+
+#### オーディオデータ
+`audio:<timestamp>:<data>`
+
+-   **`<type>`**: `audio`
+-   **`<timestamp>`**: キャプチャ時のUNIXタイムスタンプ (浮動小数点数)。
+-   **`<data>`**: 16ビット符号付き整数・リトルエンディアンの生PCMデータをBase64エンコードした文字列。
 
 ## コマンドライン引数
 
-```
-usage: main.py [-h] --camera-type {rpi,usb} [--port PORT] [--host HOST] [--width WIDTH] [--height HEIGHT] [--fps FPS] [--quality QUALITY] [--device-id DEVICE_ID] [--enable-audio]
-               [--audio-device AUDIO_DEVICE] [--audio-channels AUDIO_CHANNELS] [--audio-samplerate AUDIO_SAMPLERATE]
+`-h` または `--help` で、以下の引数の詳細を確認できます。
 
-WebSocket Media Streamer
+#### 一般設定
 
-options:
-  -h, --help            show this help message and exit
-  --camera-type {rpi,usb}
-                        Type of camera to use.
-  --port PORT
-  --host HOST
-  --width WIDTH
-  --height HEIGHT
-  --fps FPS
-  --quality QUALITY
-  --device-id DEVICE_ID
-                        USB camera device ID.
-  --enable-audio
-  --audio-device AUDIO_DEVICE
-                        Audio input device index.
-  --audio-channels AUDIO_CHANNELS
-                        Number of audio channels (1=mono).
-  --audio-samplerate AUDIO_SAMPLERATE
-                        Audio sample rate in Hz. Defaults to device default.
-```
+| 引数 | 説明 |
+| --- | --- |
+| `--camera-type {rpi,usb}` | **（必須）** 使用するカメラの種類を選択します。 |
+| `--host <IP>` | サーバーがリッスンするホストIPアドレス。デフォルトは `0.0.0.0`（すべてのインターフェース）です。 |
+| `--port <PORT>` | サーバーが使用するポート番号。デフォルトは `8080` です。 |
+
+#### 映像設定
+
+| 引数 | 説明 |
+| --- | --- |
+| `--width <N>` | ストリーミングされる最終的な映像の**幅**（ピクセル）。デフォルトは `640` です。 |
+| `--height <N>` | ストリーミングされる最終的な映像の**高さ**（ピクセル）。デフォルトは `480` です。 |
+| `--capture-width <N>` | **[USBカメラのみ]** カメラから映像をキャプチャする際の幅。省略時は `--width` の値が使われます。 |
+| `--capture-height <N>` | **[USBカメラのみ]** カメラから映像をキャプチャする際の高さ。省略時は `--height` の値が使われます。 |
+| `--fps <N>` | フレームレート（Frames Per Second）。デフォルトは `15` です。 |
+| `--quality <1-100>` | JPEGエンコードの品質。数値が高いほど高画質です。デフォルトは `70` です。 |
+| `--device-id <N>` | **[USBカメラのみ]** カメラのデバイスID（通常は `0`、複数接続時に変更）。デフォルトは `0` です。 |
+
+#### 音声設定
+
+| 引数 | 説明 |
+| --- | --- |
+| `--enable-audio` | このフラグを付けると、音声のストリーミングが有効になります。 |
+| `--audio-device <N>` | 使用するマイクのデバイスID。省略時はシステムのデフォルト入力デバイスが使われます。 |
+| `--audio-channels <N>` | オーディオチャンネル数（`1`=モノラル, `2`=ステレオ）。デフォルトは `1` です。 |
+| `--audio-samplerate <N>` | サンプルレート（Hz）。省略時はデバイスのデフォルト値が使われます（例: `44100`, `48000`）。 |
+
+#### パフォーマンス設定
+
+| 引数 | 説明 |
+| --- | --- |
+| `--video-queue-size <N>` | 映像フレームを保持する内部キューの最大サイズ。デフォルトは `50` です。 |
+| `--audio-queue-size <N>` | 音声パケットを保持する内部キューの最大サイズ。デフォルトは `500` です。 |
