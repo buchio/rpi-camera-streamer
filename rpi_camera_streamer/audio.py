@@ -18,7 +18,7 @@ def add_audio_args(parser):
                         help="Audio sample rate in Hz. Defaults to device default.")
 
 
-def audio_capture_thread(args, combined_queue):
+def audio_capture_process(args, audio_queue):
     if not SOUNDDEVICE_AVAILABLE:
         logging.error(
             "sounddevice library not found. Audio stream will not start.")
@@ -43,10 +43,10 @@ def audio_capture_thread(args, combined_queue):
         if status:
             logging.warning(status)
         timestamp = time.time()
-        if not combined_queue.full():
-            combined_queue.put(('audio', timestamp, indata.tobytes()))
+        if not audio_queue.full():
+            audio_queue.put(('audio', timestamp, indata.tobytes()))
         else:
-            logging.warning("Combined queue full, dropping audio frame.")
+            logging.warning("Audio queue full, dropping audio frame.")
 
     with sd.InputStream(samplerate=samplerate, channels=channels, dtype='int16', blocksize=blocksize, callback=callback):
         while True:

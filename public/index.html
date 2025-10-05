@@ -4,8 +4,8 @@
     <title>WebSocket Media Stream</title>
     <style>
         body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #222; color: #eee; }
-        #video-container { position: relative; }
-        #video { background: #000; min-width: 640px; min-height: 480px; border: 1px solid #444; }
+        #video-container { position: relative; width: 100%; max-width: 640px; }
+        #video { width: 100%; height: auto; background: #000; border: 1px solid #444; display: block; }
         #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; display: flex; justify-content: center; align-items: center; cursor: pointer; font-size: 1.5em; }
         #log { width: 640px; height: 200px; overflow-y: scroll; border: 1px solid #444; background: #333; padding: 5px; font-family: monospace; }
     </style>
@@ -13,8 +13,13 @@
 <body>
     <h1>WebSocket Media Stream</h1>
     <div id="video-container">
-        <img id="video" src="" width="640" height="480">
+        <img id="video" src="">
         <div id="overlay">Click to Start Audio</div>
+    </div>
+    <div id="timestamps">
+        <p>Video Timestamp: <span id="video-timestamp">N/A</span></p>
+        <p>Video Resolution: <span id="video-resolution">N/A</span></p>
+        <p>Audio Timestamp: <span id="audio-timestamp">N/A</span></p>
     </div>
     <h3>Log</h3>
     <div id="log"></div>
@@ -22,6 +27,9 @@
         const video = document.getElementById('video');
         const logDiv = document.getElementById('log');
         const overlay = document.getElementById('overlay');
+        const videoTimestampSpan = document.getElementById('video-timestamp');
+        const videoResolutionSpan = document.getElementById('video-resolution');
+        const audioTimestampSpan = document.getElementById('audio-timestamp');
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         
         function log(message) {
@@ -82,12 +90,36 @@
         socket.onmessage = (event) => {
             const parts = event.data.split(':');
             const type = parts[0];
-            const timestamp = parseFloat(parts[1]);
-            const data = parts[2];
 
             if (type === 'video') {
+                const timestamp = parseFloat(parts[1]);
+                const width = parseInt(parts[2], 10);
+                const height = parseInt(parts[3], 10);
+                const data = parts[4];
+
+                video.style.aspectRatio = width + ' / ' + height;
                 video.src = 'data:image/jpeg;base64,' + data;
+                videoTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    fractionalSecondDigits: 3
+                });
+                videoResolutionSpan.innerText = `${width} x ${height}`;
+
             } else if (type === 'audio') {
+                const timestamp = parseFloat(parts[1]);
+                const data = parts[2];
+
+                audioTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    fractionalSecondDigits: 3
+                });
+
                 const binaryString = atob(data);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
