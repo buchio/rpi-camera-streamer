@@ -47,9 +47,9 @@ def audio_capture_process(args, audio_queue):
         if status:
             logging.warning(status)
         timestamp = time.time()
-        encoded_data = base64.b64encode(indata.tobytes())
+        raw_data = indata.tobytes()
         if not audio_queue.full():
-            audio_queue.put(('audio', timestamp, encoded_data))
+            audio_queue.put(('audio', timestamp, raw_data))
         else:
             logging.warning("Audio queue full, dropping audio frame.")
 

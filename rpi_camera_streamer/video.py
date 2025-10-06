@@ -220,11 +220,9 @@ def _rpi_capture(args, video_queue):
             frame_data = output.getvalue()
             output.seek(0)
             output.truncate()
-            raw_size = len(frame_data)
-            encoded_data = base64.b64encode(frame_data)
             if not video_queue.full():
                 video_queue.put(
-                    ('video', timestamp, actual_width, actual_height, raw_size, encoded_data))
+                    ('video', timestamp, actual_width, actual_height, frame_data))
             else:
                 logging.warning("Video queue full, dropping video frame.")
     finally:

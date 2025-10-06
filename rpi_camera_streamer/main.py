@@ -2,7 +2,7 @@ import sys
 import argparse
 import time
 import logging
-import base64
+import struct
 import queue
 import asyncio
 from multiprocessing import Process, Queue
@@ -64,16 +64,20 @@ async def broadcast_task(video_queue, audio_queue):
                 try:
                     item = q.get_nowait()
                     event_type = item[0]
-                    message = ""
+                    message = b''  # Message is now bytes
 
                     if event_type == 'video':
-                        _, timestamp, width, height, raw_size, data = item
-                        jpeg_size_sum += raw_size
+                        # item: ('video', timestamp, width, height, data)
+                        _, timestamp, width, height, data = item
+                        jpeg_size_sum += len(data)
                         jpeg_count += 1
-                        message = f'video:{timestamp}:{width}:{height}:{data.decode("utf-8")}'
+                        # Pack as: 'v' (1 byte) + timestamp (8 bytes, double) + width (2 bytes, short) + height (2 bytes, short) + jpeg_data
+                        message = b'v' + struct.pack('<dHH', timestamp, width, height) + data
                     elif event_type == 'audio':
+                        # item: ('audio', timestamp, data)
                         _, timestamp, data = item
-                        message = f'audio:{timestamp}:{data.decode("utf-8")}'
+                        # Pack as: 'a' (1 byte) + timestamp (8 bytes, double) + audio_data
+                        message = b'a' + struct.pack('<d', timestamp) + data
 
                     if message:
                         async with clients_lock:
@@ -81,8 +85,15 @@ async def broadcast_task(video_queue, audio_queue):
                                 try:
                                     client_q.put_nowait(message)
                                 except asyncio.QueueFull:
-                                    logging.warning(
-                                        "A client's queue is full. The client is lagging.")
+                                    # The queue is full. Drop the oldest frame and add the new one.
+                                    try:
+                                        client_q.get_nowait()  # Remove the oldest item
+                                        client_q.put_nowait(message)  # Add the newest item
+                                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                                        # This might happen under race conditions. If so, we just drop the frame.
+                                        logging.warning(
+                                            "Dropping frame for lagging client under race condition.")
+                                        pass
                 except queue.Empty:
                     continue
 

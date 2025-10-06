@@ -60,10 +60,10 @@
     <h1>Multi-Stream Viewer</h1>
     <div id="streams-container">
         <!-- To configure streams, edit the data-host and title in each item -->
-        <div class="stream-item" data-host="192.168.100.82:8080">
+        <div class="stream-item" data-host="localhost:8080">
             <div class="video-container">
                 <canvas class="video-canvas"></canvas>
-                <div class="host-name-overlay">Machine room</div>
+                <div class="host-name-overlay">Stream 1</div>
                 <div class="overlay">Audio OFF</div>
                 <div class="timestamp-overlay">
                     <span class="video-info">V: N/A</span>
@@ -170,13 +170,7 @@
             function toggleAudio() {
                 const { audioCtx, id } = streamState;
                 if (audioCtx.state === 'suspended') {
-                    // Turn off all other streams first
-                    allStreams.forEach(s => {
-                        if (s.id !== id) {
-                            s.suspendAudio();
-                        }
-                    });
-                    // Then, resume this one
+                    allStreams.forEach(s => { if (s.id !== id) s.suspendAudio(); });
                     audioCtx.resume().then(() => {
                         log(`[${host}] Audio context resumed.`);
                         streamState.isAudioEnabled = true;
@@ -198,6 +192,7 @@
 
             function connect() {
                 const socket = new WebSocket(`ws://${host}/stream`);
+                socket.binaryType = 'arraybuffer'; // Set binary type
 
                 socket.onopen = () => log(`[${host}] WebSocket connection established.`);
                 socket.onclose = () => {
@@ -205,18 +200,22 @@
                     videoInfoSpan.textContent = 'V: Disconnected';
                     audioInfoSpan.textContent = 'A: N/A';
                 }
-                socket.onerror = (err) => log(`[${host}] WebSocket error: ${err.message}`);
+                socket.onerror = (err) => log(`[${host}] WebSocket error.`);
 
                 socket.onmessage = (event) => {
-                    const parts = event.data.split(':');
-                    const type = parts[0];
+                    const data = event.data;
+                    const view = new DataView(data);
+                    const type = String.fromCharCode(view.getUint8(0));
+                    const timestamp = view.getFloat64(1, true); // 8 bytes, little-endian
 
-                    if (type === 'video') {
-                        const timestamp = parseFloat(parts[1]);
-                        const width = parseInt(parts[2], 10);
-                        const height = parseInt(parts[3], 10);
-                        const data = parts[4];
+                    if (type === 'v') {
+                        const width = view.getUint16(9, true); // 2 bytes
+                        const height = view.getUint16(11, true); // 2 bytes
+                        const jpegData = data.slice(13);
 
+                        const blob = new Blob([jpegData], { type: 'image/jpeg' });
+                        const imageUrl = URL.createObjectURL(blob);
+                        
                         const image = new Image();
                         image.onload = function() {
                             if (canvas.width !== image.width || canvas.height !== image.height) {
@@ -224,34 +223,26 @@
                                 canvas.height = image.height;
                             }
                             ctx.drawImage(image, 0, 0);
+                            URL.revokeObjectURL(imageUrl); // Release memory
                         };
-                        image.src = 'data:image/jpeg;base64,' + data;
+                        image.src = imageUrl;
 
                         const timeString = new Date(timestamp * 1000).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
                         videoInfoSpan.textContent = `V: ${timeString} (${width}x${height})`;
 
-                    } else if (type === 'audio' && streamState.isAudioEnabled) {
-                        const timestamp = parseFloat(parts[1]);
-                        const data = parts[2];
-                        const { audioCtx, audioQueue } = streamState;
+                    } else if (type === 'a' && streamState.isAudioEnabled) {
+                        const audioData = new Int16Array(data.slice(9));
+                        const float32Array = new Float32Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            float32Array[i] = audioData[i] / 32768.0;
+                        }
+
+                        const audioBuffer = streamState.audioCtx.createBuffer(1, float32Array.length, streamState.audioCtx.sampleRate);
+                        audioBuffer.copyToChannel(float32Array, 0);
+                        streamState.audioQueue.push(audioBuffer);
 
                         const timeString = new Date(timestamp * 1000).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
                         audioInfoSpan.textContent = `A: ${timeString}`;
-
-                        const binaryString = atob(data);
-                        const len = binaryString.length;
-                        const bytes = new Uint8Array(len);
-                        for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-
-                        const dataView = new DataView(bytes.buffer);
-                        const float32Array = new Float32Array(len / 2);
-                        for (let i = 0; i < float32Array.length; i++) {
-                            float32Array[i] = dataView.getInt16(i * 2, true) / 32768.0;
-                        }
-
-                        const audioBuffer = audioCtx.createBuffer(1, float32Array.length, audioCtx.sampleRate);
-                        audioBuffer.copyToChannel(float32Array, 0);
-                        audioQueue.push(audioBuffer);
                     }
                 };
             }
