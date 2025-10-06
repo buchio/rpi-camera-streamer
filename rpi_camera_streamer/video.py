@@ -3,6 +3,7 @@ import time
 import logging
 import subprocess
 import re
+import os
 import base64
 
 # --- Conditional Imports ---
@@ -234,6 +235,13 @@ def _rpi_capture(args, video_queue):
 
 
 def video_capture_process(args, video_queue):
+    try:
+        # Decrease priority of the video process
+        os.nice(10)
+        logging.info(f"Video process priority set to: {os.nice(0)}")
+    except OSError as e:
+        logging.warning(f"Failed to set video process priority: {e}")
+
     logging.info(f"Starting video capture with type: {args.camera_type}")
 
     if args.camera_type == 'rpi':

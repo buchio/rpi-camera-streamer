@@ -2,6 +2,7 @@
 import time
 import logging
 import base64
+import os
 
 try:
     import sounddevice as sd
@@ -20,10 +21,12 @@ def add_audio_args(parser):
 
 
 def audio_capture_process(args, audio_queue):
-    if not SOUNDDEVICE_AVAILABLE:
-        logging.error(
-            "sounddevice library not found. Audio stream will not start.")
-        return
+    try:
+        # Increase priority of the audio process
+        os.nice(-10)
+        logging.info(f"Audio process priority set to: {os.nice(0)}")
+    except OSError as e:
+        logging.warning(f"Failed to set audio process priority: {e}")
 
     try:
         device_info = sd.query_devices(args.audio_device, 'input')
