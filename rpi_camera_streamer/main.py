@@ -55,13 +55,13 @@ def broadcast_thread(video_queue, audio_queue, video_queue_maxsize, audio_queue_
                     message = ""
 
                     if event_type == 'video':
-                        _, timestamp, width, height, data = item
-                        jpeg_size_sum += len(data)
+                        _, timestamp, width, height, raw_size, data = item
+                        jpeg_size_sum += raw_size
                         jpeg_count += 1
-                        message = f'video:{timestamp}:{width}:{height}:{base64.b64encode(data).decode("utf-8")}'
+                        message = f'video:{timestamp}:{width}:{height}:{data.decode("utf-8")}'
                     elif event_type == 'audio':
                         _, timestamp, data = item
-                        message = f'audio:{timestamp}:{base64.b64encode(data).decode("utf-8")}'
+                        message = f'audio:{timestamp}:{data.decode("utf-8")}'
 
                     if message:
                         with clients_lock:

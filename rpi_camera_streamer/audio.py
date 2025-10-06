@@ -1,6 +1,7 @@
 
 import time
 import logging
+import base64
 
 try:
     import sounddevice as sd
@@ -43,8 +44,9 @@ def audio_capture_process(args, audio_queue):
         if status:
             logging.warning(status)
         timestamp = time.time()
+        encoded_data = base64.b64encode(indata.tobytes())
         if not audio_queue.full():
-            audio_queue.put(('audio', timestamp, indata.tobytes()))
+            audio_queue.put(('audio', timestamp, encoded_data))
         else:
             logging.warning("Audio queue full, dropping audio frame.")
 
