@@ -168,11 +168,9 @@ def _v4l2_capture(args, video_queue):
                 fcntl.ioctl(device, v4l2.VIDIOC_DQBUF, buf)
                 jpeg_data = buffers[buf.index].read(buf.bytesused)
                 buffers[buf.index].seek(0)
-                raw_size = len(jpeg_data)
-                encoded_data = base64.b64encode(jpeg_data)
                 if not video_queue.full():
                     video_queue.put(
-                        ('video', time.time(), actual_width, actual_height, raw_size, encoded_data))
+                        ('video', time.time(), actual_width, actual_height, jpeg_data))
                 fcntl.ioctl(device, v4l2.VIDIOC_QBUF, buf)
 
     except (IOError, OSError) as e:

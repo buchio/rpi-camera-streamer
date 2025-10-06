@@ -78,3 +78,4 @@ For all options, run `python3 main.py --help`.
 *   Camera and stream selection is handled via command-line arguments.
 *   Video streams include a timestamp overlay for monitoring.
 *   There are currently no automated tests or specific linting configurations evident in the project.
+*   **Formatting**: After modifying a Python file, run `autopep8 -i <file_path>` to format the code.

@@ -72,7 +72,9 @@ async def broadcast_task(video_queue, audio_queue):
                         jpeg_size_sum += len(data)
                         jpeg_count += 1
                         # Pack as: 'v' (1 byte) + timestamp (8 bytes, double) + width (2 bytes, short) + height (2 bytes, short) + jpeg_data
-                        message = b'v' + struct.pack('<dHH', timestamp, width, height) + data
+                        message = b'v' + \
+                            struct.pack('<dHH', timestamp,
+                                        width, height) + data
                     elif event_type == 'audio':
                         # item: ('audio', timestamp, data)
                         _, timestamp, data = item
@@ -88,7 +90,8 @@ async def broadcast_task(video_queue, audio_queue):
                                     # The queue is full. Drop the oldest frame and add the new one.
                                     try:
                                         client_q.get_nowait()  # Remove the oldest item
-                                        client_q.put_nowait(message)  # Add the newest item
+                                        # Add the newest item
+                                        client_q.put_nowait(message)
                                     except (asyncio.QueueEmpty, asyncio.QueueFull):
                                         # This might happen under race conditions. If so, we just drop the frame.
                                         logging.warning(
