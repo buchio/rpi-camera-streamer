@@ -4,17 +4,12 @@ import time
 import logging
 import base64
 import queue
+import asyncio
 from multiprocessing import Process, Queue
-from threading import Thread, Lock
 
-from flask import Flask
+from quart import Quart, websocket
 
 # --- Conditional Imports & Module Availability ---
-try:
-    from flask_sock import Sock
-except ImportError:
-    sys.exit("Error: Flask-Sock is not installed. Please run 'pip install Flask-Sock'")
-
 try:
     from . import video
 except ImportError as e:
@@ -28,45 +23,34 @@ except (ImportError, OSError) as e:
     audio = None
 
 # --- Global State ---
-# This dictionary will hold information about each connected client
-# { client_id: {'queue': threading.Queue, 'thread': threading.Thread} }
+# { client_id: asyncio.Queue }
 clients = {}
-clients_lock = Lock()
+clients_lock = asyncio.Lock()
 
-# --- Client-specific Sender Thread ---
+# --- Client-specific Sender Task ---
 
 
-def client_sender_thread(ws, client_queue):
-    """
-    This thread belongs to a single client and is responsible for sending
-    messages from its dedicated queue to the WebSocket client.
-    """
+async def client_sender_task(ws, client_queue):
+    """This asyncio task sends messages from a client's dedicated queue."""
     while True:
         try:
-            # Wait for a message, with a timeout to check if the client is still alive
-            message = client_queue.get(timeout=1)
-            if message is None:  # None is the signal to terminate
+            message = await client_queue.get()
+            if message is None:  # Termination signal
                 break
-            ws.send(message)
-        except queue.Empty:
-            # Timeout occurred, which is normal. The loop continues.
-            # The 'ws.send()' will raise an exception if the socket is truly closed.
-            pass
-        except Exception as e:
-            logging.warning(
-                f"Error sending to client: {e}. Terminating sender thread.")
+            await ws.send(message)
+        except asyncio.CancelledError:
             break
-    logging.info("Client sender thread terminated.")
+        except Exception as e:
+            logging.warning(f"Error in sender task: {e}. Terminating.")
+            break
+    logging.info("Client sender task terminated.")
 
-# --- Broadcaster Thread ---
+# --- Broadcaster Task ---
 
 
-def broadcast_thread(video_queue, audio_queue):
-    """
-    This thread fetches data from the video and audio (multiprocessing) queues,
-    formats the message, and puts it into the dedicated queue for each client.
-    """
-    logging.info("Broadcast thread started.")
+async def broadcast_task(video_queue, audio_queue):
+    """Fetches data from capture processes and fans it out to clients."""
+    logging.info("Broadcast task started.")
     queues = [audio_queue, video_queue]  # Audio queue has priority
 
     # Monitoring variables
@@ -75,7 +59,6 @@ def broadcast_thread(video_queue, audio_queue):
     jpeg_count = 0
 
     while True:
-        # Non-blocking check on the capture queues
         for q in queues:
             if not q.empty():
                 try:
@@ -93,14 +76,13 @@ def broadcast_thread(video_queue, audio_queue):
                         message = f'audio:{timestamp}:{data.decode("utf-8")}'
 
                     if message:
-                        # Put the formatted message into each client's personal queue
-                        with clients_lock:
-                            for client_id, client_info in list(clients.items()):
+                        async with clients_lock:
+                            for client_q in clients.values():
                                 try:
-                                    client_info['queue'].put_nowait(message)
-                                except queue.Full:
+                                    client_q.put_nowait(message)
+                                except asyncio.QueueFull:
                                     logging.warning(
-                                        f"Client queue full for {client_id}. Client might be lagging.")
+                                        "A client's queue is full. The client is lagging.")
                 except queue.Empty:
                     continue
 
@@ -109,112 +91,82 @@ def broadcast_thread(video_queue, audio_queue):
         if current_time - last_log_time > 10:
             avg_jpeg_size_kb = (jpeg_size_sum / jpeg_count /
                                 1024) if jpeg_count > 0 else 0
-            # Note: qsize() is approximate.
             logging.info(
                 f"Broadcast Queues: video={video_queue.qsize()}, audio={audio_queue.qsize()}. "
                 f"Avg JPEG Size (10s): {avg_jpeg_size_kb:.1f} KB"
             )
-            # Reset counters
             last_log_time = current_time
             jpeg_size_sum = 0
             jpeg_count = 0
 
-        # Sleep briefly if both capture queues are empty
-        if audio_queue.empty() and video_queue.empty():
-            time.sleep(0.001)
+        await asyncio.sleep(0.001)  # Yield control to the event loop
 
 # --- Main Execution ---
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="WebSocket Media Streamer")
-
     if video:
         video.add_video_args(parser)
     if audio:
         audio.add_audio_args(parser)
-
     parser.add_argument('--port', type=int, default=8080)
     parser.add_argument('--host', type=str, default='0.0.0.0')
     parser.add_argument('--video-queue-size', type=int,
                         default=50, help="Internal queue size for video frames.")
     parser.add_argument('--audio-queue-size', type=int, default=500,
                         help="Internal queue size for audio packets.")
-
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format='[%(levelname)s] %(message)s')
 
-    # --- Initialize Queues ---
-    # These are multiprocessing queues to get data from capture processes
     video_queue = Queue(maxsize=args.video_queue_size)
     audio_queue = Queue(maxsize=args.audio_queue_size)
 
-    # --- Web App Initialization and Routes ---
-    app = Flask(__name__)
-    sock = Sock(app)
+    app = Quart(__name__)
 
-    @sock.route('/stream')
-    def stream(ws):
+    @app.websocket('/stream')
+    async def stream():
+        ws = websocket._get_current_object()
         client_id = id(ws)
-        # Standard threading queue for this client
-        client_queue = queue.Queue(maxsize=100)
+        client_queue = asyncio.Queue(maxsize=100)
+        sender_task = asyncio.create_task(client_sender_task(ws, client_queue))
 
-        sender_thread = Thread(
-            target=client_sender_thread, args=(ws, client_queue))
-        sender_thread.daemon = True
-
-        with clients_lock:
-            clients[client_id] = {
-                'queue': client_queue, 'thread': sender_thread}
+        async with clients_lock:
+            clients[client_id] = client_queue
 
         logging.info(f"New client connected: {client_id}")
-        sender_thread.start()
 
         try:
-            # This loop will be broken when the client disconnects,
-            # causing ws.receive() to raise an exception.
             while True:
-                ws.receive()
-        except Exception as e:
-            logging.info(f"Client {client_id} connection closed or error: {e}")
+                await ws.receive()
+        except asyncio.CancelledError:
+            pass  # Expected on disconnect
         finally:
             logging.info(f"Client {client_id} disconnected.")
-            with clients_lock:
+            sender_task.cancel()
+            async with clients_lock:
                 if client_id in clients:
-                    # Signal the sender thread to terminate
-                    try:
-                        clients[client_id]['queue'].put_nowait(None)
-                    except queue.Full:
-                        pass  # If queue is full, thread will eventually timeout and exit
                     del clients[client_id]
 
-    # --- Start background processes and threads ---
+    # Start background processes
     if video:
         Process(target=video.video_capture_process, args=(
             args, video_queue), daemon=True).start()
-    else:
-        logging.error(
-            "Video module not available. Video components not started.")
-
     if args.enable_audio:
         if audio:
             Process(target=audio.audio_capture_process, args=(
                 args, audio_queue), daemon=True).start()
-        else:
-            logging.warning(
-                "Audio module not available. Audio components not started.")
 
-    # Start the unified broadcaster thread
-    # This thread now fans out messages to individual client queues
-    broadcaster = Thread(target=broadcast_thread, args=(
-        video_queue, audio_queue), daemon=True)
-    broadcaster.start()
+    # Start background asyncio tasks
+    asyncio.create_task(broadcast_task(video_queue, audio_queue))
 
     logging.info(f"Server starting on http://{args.host}:{args.port}")
-    app.run(host=args.host, port=args.port, threaded=True)
-
+    await app.run_task(host=args.host, port=args.port)
 
 if __name__ == '__main__':
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Server shutting down.")

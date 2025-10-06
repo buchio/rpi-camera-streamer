@@ -8,10 +8,11 @@ Raspberry Piに接続されたカメラモジュールまたはUSBウェブカ�
 
 ## 主な機能
 
--   **WebSocketベースのストリーミング**: HTTPストリーミングに比べ、より低遅延でリアルタイム性の高い通信を実現します。
+-   **非同期Webフレームワーク**: `Quart` (`asyncio`ベース) を使用し、多数のクライアント接続を効率的に処理します。
 -   **プロセスベースのキャプチャ**: CPU負荷の高い映像・音声のキャプチャ処理を別々のプロセスで実行するため、メインのWebサーバーへの影響を最小限に抑え、安定した動作を実現します。
+-   **ダイレクトMJPEGストリーミング (USBカメラ)**: Linux環境では、`pyv4l2`を利用してUSBカメラから直接MJPEG圧縮ストリームを取得します。これにより、CPU負荷の高い再エンコード処理を完全にスキップします。
 -   **タイムスタンプと解像度の埋め込み**: 映像・音声の各データパケットにUNIXタイムスタンプが付与されます。特に映像データには、フレームごとの解像度（幅・高さ）情報も含まれます。
--   **デュアルカメラ対応**: Raspberry Piカメラモジュール (`picamera2`経由) とUSBウェブカメラ (`OpenCV`経由) の両方で動作します。
+-   **デュアルカメラ対応**: Raspberry Piカメラモジュール (`picamera2`経由) とUSBウェブカメラ (`pyv4l2`経由) の両方で動作します。
 -   **音声ストリーミング**: マイクが接続されていれば、映像と同時に音声もストリーミングできます (`sounddevice`経由)。
 -   **サーバーから分離されたクライアント**: サーバーはデータ配信に専念し、クライアントは `public` ディレクトリ内のHTML/JavaScriptファイルとして完全に分離されています。
 
@@ -20,7 +21,7 @@ Raspberry Piに接続されたカメラモジュールまたはUSBウェブカ�
 ```
 /
 ├── rpi_camera_streamer/    # アプリケーションのメインパッケージ
-│   ├── main.py             # Flaskサーバー、スレッド/プロセス管理
+│   ├── main.py             # Quartサーバー、タスク/プロセス管理
 │   ├── video.py            # 映像キャプチャプロセス
 │   └── audio.py            # 音声キャプチャプロセス
 ├── public/                 # クライアントサイドのファイル
@@ -30,10 +31,12 @@ Raspberry Piに接続されたカメラモジュールまたはUSBウェブカ�
 
 ## 依存関係のインストール
 
-pipを使用して、必要なPythonライブラリをインストールします。
+`pip`を使用して、必要なPythonライブラリをインストールします。
+
+#### 基本ライブラリ
 
 ```bash
-pip install Flask flask-sock opencv-python numpy sounddevice
+pip install Quart numpy sounddevice
 ```
 
 #### Raspberry Piカメラモジュールを使用する場合
@@ -44,6 +47,16 @@ pip install Flask flask-sock opencv-python numpy sounddevice
 pip install picamera2
 ```
 *注意: `picamera2` は通常、Bullseye以降のリリースのRaspberry Pi OSでのみ利用可能です。*
+
+#### USBカメラを使用する場合 (Linuxのみ)
+
+USBカメラのストリーミングは、`pyv4l2`に依存しています。また、`v4l2-ctl`コマンドラインツールがシステムにインストールされている必要があります（通常は`v4l-utils`パッケージに含まれます）。
+
+```bash
+pip install pyv4l2
+# Debian/Ubuntuベースの場合
+sudo apt-get install v4l-utils
+```
 
 ## 実行方法
 
