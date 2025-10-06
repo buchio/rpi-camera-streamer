@@ -212,8 +212,10 @@ def _rpi_capture(args, video_queue):
         output = io.BytesIO()
         picam2.start_recording(encoder, FileOutput(output))
 
+        # In this mode, we simply sleep and grab the latest frame from the buffer.
+        frame_duration = 1.0 / args.fps
         while True:
-            picam2.wait_recording(1)
+            time.sleep(frame_duration)
             timestamp = time.time()
             frame_data = output.getvalue()
             output.seek(0)

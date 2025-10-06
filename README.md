@@ -36,7 +36,9 @@ Raspberry Piに接続されたカメラモジュールまたはUSBウェブカ�
 #### 基本ライブラリ
 
 ```bash
-pip install Quart numpy sounddevice
+sudo apt-get install --yes python3-quart
+sudo apt-get install --yes libportaudio2 python3-soundfile
+sudo pip install --break-system-packages sounddevice
 ```
 
 #### Raspberry Piカメラモジュールを使用する場合
@@ -44,7 +46,7 @@ pip install Quart numpy sounddevice
 上記に加えて `picamera2` ライブラリもインストールする必要があります。
 
 ```bash
-pip install picamera2
+sudo apt install --yes python3-picamera2
 ```
 *注意: `picamera2` は通常、Bullseye以降のリリースのRaspberry Pi OSでのみ利用可能です。*
 
@@ -53,9 +55,7 @@ pip install picamera2
 USBカメラのストリーミングは、`pyv4l2`に依存しています。また、`v4l2-ctl`コマンドラインツールがシステムにインストールされている必要があります（通常は`v4l-utils`パッケージに含まれます）。
 
 ```bash
-pip install pyv4l2
-# Debian/Ubuntuベースの場合
-sudo apt-get install v4l-utils
+sudo apt-get install --yes python3-v4l2 v4l-utils
 ```
 
 ## 実行方法
