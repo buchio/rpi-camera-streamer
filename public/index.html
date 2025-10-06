@@ -1,38 +1,117 @@
-
 <html>
 <head>
-    <title>WebSocket Media Stream</title>
+    <title>Multi-Stream Viewer</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #222; color: #eee; }
-        #video-container { position: relative; width: 100%; max-width: 640px; }
-        #video-canvas { width: 100%; height: auto; background: #000; border: 1px solid #444; display: block; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; display: flex; justify-content: center; align-items: center; cursor: pointer; font-size: 1.5em; }
-        #log { width: 640px; height: 200px; overflow-y: scroll; border: 1px solid #444; background: #333; padding: 5px; font-family: monospace; }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #222; color: #eee; margin: 0; }
+        h1 { margin: 0.5em 0; }
+        #streams-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 95vw; max-width: 1280px; }
+        .stream-item { background: #333; border: 1px solid #444; display: flex; flex-direction: column; }
+        .video-container { position: relative; width: 100%; }
+        .video-canvas { width: 100%; height: auto; background: #000; display: block; }
+        .overlay {
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 8px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            opacity: 0.8;
+            transition: background 0.3s, opacity 0.3s;
+        }
+        .overlay:hover { background: rgba(0, 0, 0, 0.9); opacity: 1; }
+        .host-name-overlay {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 8px;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .timestamp-overlay {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 8px;
+            border-radius: 5px;
+            font-size: 0.8em;
+            text-align: right;
+            pointer-events: none; /* Make it non-interactive */
+        }
+        .timestamp-overlay span {
+            display: block;
+        }
+        #log-container { width: 95vw; max-width: 1280px; margin-top: 10px; }
+        #log { width: 100%; box-sizing: border-box; height: 150px; overflow-y: scroll; border: 1px solid #444; background: #333; padding: 5px; font-family: monospace; }
+        #log p { margin: 0; }
+
+        @media (max-width: 768px) {
+            #streams-container { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
-    <h1>WebSocket Media Stream</h1>
-    <div id="video-container">
-        <canvas id="video-canvas"></canvas>
-        <div id="overlay">Click to Start Audio</div>
+    <h1>Multi-Stream Viewer</h1>
+    <div id="streams-container">
+        <!-- To configure streams, edit the data-host and title in each item -->
+        <div class="stream-item" data-host="192.168.100.82:8080">
+            <div class="video-container">
+                <canvas class="video-canvas"></canvas>
+                <div class="host-name-overlay">Machine room</div>
+                <div class="overlay">Audio OFF</div>
+                <div class="timestamp-overlay">
+                    <span class="video-info">V: N/A</span>
+                    <span class="audio-info">A: N/A</span>
+                </div>
+            </div>
+        </div>
+        <div class="stream-item" data-host="localhost:8081">
+            <div class="video-container">
+                <canvas class="video-canvas"></canvas>
+                <div class="host-name-overlay">Stream 2</div>
+                <div class="overlay">Audio OFF</div>
+                <div class="timestamp-overlay">
+                    <span class="video-info">V: N/A</span>
+                    <span class="audio-info">A: N/A</span>
+                </div>
+            </div>
+        </div>
+        <div class="stream-item" data-host="localhost:8082">
+            <div class="video-container">
+                <canvas class="video-canvas"></canvas>
+                <div class="host-name-overlay">Stream 3</div>
+                <div class="overlay">Audio OFF</div>
+                <div class="timestamp-overlay">
+                    <span class="video-info">V: N/A</span>
+                    <span class="audio-info">A: N/A</span>
+                </div>
+            </div>
+        </div>
+        <div class="stream-item" data-host="localhost:8083">
+            <div class="video-container">
+                <canvas class="video-canvas"></canvas>
+                <div class="host-name-overlay">Stream 4</div>
+                <div class="overlay">Audio OFF</div>
+                <div class="timestamp-overlay">
+                    <span class="video-info">V: N/A</span>
+                    <span class="audio-info">A: N/A</span>
+                </div>
+            </div>
+        </div>
     </div>
-    <div id="timestamps">
-        <p>Video Timestamp: <span id="video-timestamp">N/A</span></p>
-        <p>Video Resolution: <span id="video-resolution">N/A</span></p>
-        <p>Audio Timestamp: <span id="audio-timestamp">N/A</span></p>
+    <div id="log-container">
+        <h3>Log</h3>
+        <div id="log"></div>
     </div>
-    <h3>Log</h3>
-    <div id="log"></div>
+
     <script>
-        const canvas = document.getElementById('video-canvas');
-        const ctx = canvas.getContext('2d');
         const logDiv = document.getElementById('log');
-        const overlay = document.getElementById('overlay');
-        const videoTimestampSpan = document.getElementById('video-timestamp');
-        const videoResolutionSpan = document.getElementById('video-resolution');
-        const audioTimestampSpan = document.getElementById('audio-timestamp');
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-        
         function log(message) {
             const p = document.createElement('p');
             p.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
@@ -40,109 +119,147 @@
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
-        // --- Audio Playback Logic ---
-        let audioQueue = [];
-        let nextPlayTime = 0;
-        let isPlaying = false;
-        const scheduleAheadTime = 0.2;
+        const allStreams = [];
 
-        function schedulePlayback() {
-            while (audioQueue.length > 0 && nextPlayTime < audioCtx.currentTime + scheduleAheadTime) {
-                const audioBuffer = audioQueue.shift();
-                const source = audioCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioCtx.destination);
-                if (nextPlayTime < audioCtx.currentTime) {
-                    nextPlayTime = audioCtx.currentTime;
-                }
-                source.start(nextPlayTime);
-                nextPlayTime += audioBuffer.duration;
-            }
-        }
+        document.querySelectorAll('.stream-item').forEach((item, index) => {
+            const host = item.dataset.host;
+            const canvas = item.querySelector('.video-canvas');
+            const ctx = canvas.getContext('2d');
+            const overlay = item.querySelector('.overlay');
+            const videoInfoSpan = item.querySelector('.video-info');
+            const audioInfoSpan = item.querySelector('.audio-info');
 
-        function initializeAudio() {
-            const startPlaybackLoop = () => {
-                if (!isPlaying) {
-                    isPlaying = true;
-                    setInterval(schedulePlayback, 50);
-                    log('Audio playback scheduler started.');
+            const streamState = {
+                id: index,
+                audioCtx: new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 }),
+                audioQueue: [],
+                nextPlayTime: 0,
+                isPlaying: false,
+                isAudioEnabled: false,
+                scheduleAheadTime: 0.2,
+                suspendAudio: function() {
+                    if (this.audioCtx.state === 'running') {
+                        this.audioCtx.suspend().then(() => {
+                            log(`[${host}] Audio context suspended.`);
+                            this.isAudioEnabled = false;
+                            overlay.textContent = 'Audio OFF';
+                            audioInfoSpan.textContent = 'A: N/A';
+                        }).catch(e => log(`[${host}] Audio context suspend failed: ${e}`));
+                    }
                 }
             };
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume().then(() => {
-                    log('Audio context resumed.');
-                    startPlaybackLoop();
-                }).catch(e => log(`Audio context resume failed: ${e}`));
-            } else {
-                startPlaybackLoop();
-            }
-            overlay.style.display = 'none';
-        }
-        overlay.addEventListener('click', initializeAudio, { once: true });
+            streamState.audioCtx.suspend(); // Audio is off by default
+            allStreams.push(streamState);
 
-        // --- WebSocket and Rendering Logic ---
-        const socket = new WebSocket(`ws://localhost:8080/stream`);
-
-        socket.onopen = () => log('WebSocket connection established.');
-        socket.onclose = () => log('WebSocket connection closed.');
-        socket.onerror = (err) => log(`WebSocket error: ${err}`);
-
-        socket.onmessage = (event) => {
-            const parts = event.data.split(':');
-            const type = parts[0];
-
-            if (type === 'video') {
-                const timestamp = parseFloat(parts[1]);
-                const width = parseInt(parts[2], 10);
-                const height = parseInt(parts[3], 10);
-                const data = parts[4];
-
-                const image = new Image();
-                image.onload = function() {
-                    if (canvas.width !== image.width || canvas.height !== image.height) {
-                        canvas.width = image.width;
-                        canvas.height = image.height;
-                        canvas.style.aspectRatio = image.width + ' / ' + image.height;
+            function schedulePlayback() {
+                if (!streamState.isAudioEnabled) return;
+                const { audioCtx, audioQueue } = streamState;
+                while (audioQueue.length > 0 && streamState.nextPlayTime < audioCtx.currentTime + streamState.scheduleAheadTime) {
+                    const audioBuffer = audioQueue.shift();
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioCtx.destination);
+                    if (streamState.nextPlayTime < audioCtx.currentTime) {
+                        streamState.nextPlayTime = audioCtx.currentTime;
                     }
-                    ctx.drawImage(image, 0, 0);
-                };
-                image.src = 'data:image/jpeg;base64,' + data;
-
-                // Update info display
-                videoTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
-                    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
-                });
-                videoResolutionSpan.innerText = `${width} x ${height}`;
-
-            } else if (type === 'audio') {
-                const timestamp = parseFloat(parts[1]);
-                const data = parts[2];
-
-                audioTimestampSpan.innerText = new Date(timestamp * 1000).toLocaleTimeString('en-US', { 
-                    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3
-                });
-
-                const binaryString = atob(data);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
+                    source.start(streamState.nextPlayTime);
+                    streamState.nextPlayTime += audioBuffer.duration;
                 }
-
-                const dataView = new DataView(bytes.buffer);
-                const float32Array = new Float32Array(len / 2);
-                for (let i = 0; i < float32Array.length; i++) {
-                    const int16 = dataView.getInt16(i * 2, true); 
-                    float32Array[i] = int16 / 32768.0;
-                }
-
-                const audioBuffer = audioCtx.createBuffer(1, float32Array.length, audioCtx.sampleRate);
-                audioBuffer.copyToChannel(float32Array, 0);
-                audioQueue.push(audioBuffer);
             }
-        };
 
-        log('Client initialized.');
+            function toggleAudio() {
+                const { audioCtx, id } = streamState;
+                if (audioCtx.state === 'suspended') {
+                    // Turn off all other streams first
+                    allStreams.forEach(s => {
+                        if (s.id !== id) {
+                            s.suspendAudio();
+                        }
+                    });
+                    // Then, resume this one
+                    audioCtx.resume().then(() => {
+                        log(`[${host}] Audio context resumed.`);
+                        streamState.isAudioEnabled = true;
+                        overlay.textContent = 'Audio ON';
+                    }).catch(e => log(`[${host}] Audio context resume failed: ${e}`));
+                } else if (audioCtx.state === 'running') {
+                    streamState.suspendAudio();
+                }
+            }
+
+            overlay.addEventListener('click', () => {
+                if (!streamState.isPlaying) {
+                    streamState.isPlaying = true;
+                    setInterval(schedulePlayback, 50);
+                    log(`[${host}] Audio playback scheduler started.`);
+                }
+                toggleAudio();
+            });
+
+            function connect() {
+                const socket = new WebSocket(`ws://${host}/stream`);
+
+                socket.onopen = () => log(`[${host}] WebSocket connection established.`);
+                socket.onclose = () => {
+                    log(`[${host}] WebSocket connection closed.`);
+                    videoInfoSpan.textContent = 'V: Disconnected';
+                    audioInfoSpan.textContent = 'A: N/A';
+                }
+                socket.onerror = (err) => log(`[${host}] WebSocket error: ${err.message}`);
+
+                socket.onmessage = (event) => {
+                    const parts = event.data.split(':');
+                    const type = parts[0];
+
+                    if (type === 'video') {
+                        const timestamp = parseFloat(parts[1]);
+                        const width = parseInt(parts[2], 10);
+                        const height = parseInt(parts[3], 10);
+                        const data = parts[4];
+
+                        const image = new Image();
+                        image.onload = function() {
+                            if (canvas.width !== image.width || canvas.height !== image.height) {
+                                canvas.width = image.width;
+                                canvas.height = image.height;
+                            }
+                            ctx.drawImage(image, 0, 0);
+                        };
+                        image.src = 'data:image/jpeg;base64,' + data;
+
+                        const timeString = new Date(timestamp * 1000).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+                        videoInfoSpan.textContent = `V: ${timeString} (${width}x${height})`;
+
+                    } else if (type === 'audio' && streamState.isAudioEnabled) {
+                        const timestamp = parseFloat(parts[1]);
+                        const data = parts[2];
+                        const { audioCtx, audioQueue } = streamState;
+
+                        const timeString = new Date(timestamp * 1000).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+                        audioInfoSpan.textContent = `A: ${timeString}`;
+
+                        const binaryString = atob(data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+
+                        const dataView = new DataView(bytes.buffer);
+                        const float32Array = new Float32Array(len / 2);
+                        for (let i = 0; i < float32Array.length; i++) {
+                            float32Array[i] = dataView.getInt16(i * 2, true) / 32768.0;
+                        }
+
+                        const audioBuffer = audioCtx.createBuffer(1, float32Array.length, audioCtx.sampleRate);
+                        audioBuffer.copyToChannel(float32Array, 0);
+                        audioQueue.push(audioBuffer);
+                    }
+                };
+            }
+
+            connect();
+        });
+
+        log('Client initialized. Connecting to all streams...');
     </script>
 </body>
 </html>
