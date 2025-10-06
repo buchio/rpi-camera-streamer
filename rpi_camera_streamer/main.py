@@ -27,16 +27,45 @@ except (ImportError, OSError) as e:
     logging.warning(f"Could not import audio module: {e}")
     audio = None
 
-import queue
-
-# --- Global State & Queues ---
-clients = []
+# --- Global State ---
+# This dictionary will hold information about each connected client
+# { client_id: {'queue': threading.Queue, 'thread': threading.Thread} }
+clients = {}
 clients_lock = Lock()
+
+# --- Client-specific Sender Thread ---
+
+
+def client_sender_thread(ws, client_queue):
+    """
+    This thread belongs to a single client and is responsible for sending
+    messages from its dedicated queue to the WebSocket client.
+    """
+    while True:
+        try:
+            # Wait for a message, with a timeout to check if the client is still alive
+            message = client_queue.get(timeout=1)
+            if message is None:  # None is the signal to terminate
+                break
+            ws.send(message)
+        except queue.Empty:
+            # Timeout occurred, which is normal. The loop continues.
+            # The 'ws.send()' will raise an exception if the socket is truly closed.
+            pass
+        except Exception as e:
+            logging.warning(
+                f"Error sending to client: {e}. Terminating sender thread.")
+            break
+    logging.info("Client sender thread terminated.")
 
 # --- Broadcaster Thread ---
 
 
-def broadcast_thread(video_queue, audio_queue, video_queue_maxsize, audio_queue_maxsize):
+def broadcast_thread(video_queue, audio_queue):
+    """
+    This thread fetches data from the video and audio (multiprocessing) queues,
+    formats the message, and puts it into the dedicated queue for each client.
+    """
     logging.info("Broadcast thread started.")
     queues = [audio_queue, video_queue]  # Audio queue has priority
 
@@ -46,7 +75,7 @@ def broadcast_thread(video_queue, audio_queue, video_queue_maxsize, audio_queue_
     jpeg_count = 0
 
     while True:
-        disconnected_clients = set()
+        # Non-blocking check on the capture queues
         for q in queues:
             if not q.empty():
                 try:
@@ -64,39 +93,33 @@ def broadcast_thread(video_queue, audio_queue, video_queue_maxsize, audio_queue_
                         message = f'audio:{timestamp}:{data.decode("utf-8")}'
 
                     if message:
+                        # Put the formatted message into each client's personal queue
                         with clients_lock:
-                            for client in clients:
+                            for client_id, client_info in list(clients.items()):
                                 try:
-                                    client.send(message)
-                                except Exception:
-                                    disconnected_clients.add(client)
+                                    client_info['queue'].put_nowait(message)
+                                except queue.Full:
+                                    logging.warning(
+                                        f"Client queue full for {client_id}. Client might be lagging.")
                 except queue.Empty:
                     continue
 
-        if disconnected_clients:
-            with clients_lock:
-                for client in disconnected_clients:
-                    if client in clients:
-                        clients.remove(client)
-                        logging.info("Client disconnected and removed.")
-
-        # --- Log queue status periodically --- #
+        # Log queue status periodically
         current_time = time.time()
         if current_time - last_log_time > 10:
             avg_jpeg_size_kb = (jpeg_size_sum / jpeg_count /
                                 1024) if jpeg_count > 0 else 0
+            # Note: qsize() is approximate.
             logging.info(
-                f"Queue Status: video={video_queue.qsize()}/{video_queue_maxsize}, "
-                f"audio={audio_queue.qsize()}/{audio_queue_maxsize}, "
-                f"avg_jpeg_kb={avg_jpeg_size_kb:.1f}"
+                f"Broadcast Queues: video={video_queue.qsize()}, audio={audio_queue.qsize()}. "
+                f"Avg JPEG Size (10s): {avg_jpeg_size_kb:.1f} KB"
             )
             # Reset counters
             last_log_time = current_time
             jpeg_size_sum = 0
             jpeg_count = 0
-        # ------------------------------------ #
 
-        # Sleep briefly if both queues are empty to prevent busy-waiting
+        # Sleep briefly if both capture queues are empty
         if audio_queue.empty() and video_queue.empty():
             time.sleep(0.001)
 
@@ -108,15 +131,14 @@ def main():
 
     if video:
         video.add_video_args(parser)
-
     if audio:
         audio.add_audio_args(parser)
 
     parser.add_argument('--port', type=int, default=8080)
     parser.add_argument('--host', type=str, default='0.0.0.0')
     parser.add_argument('--video-queue-size', type=int,
-                        default=10, help="Internal queue size for video frames.")
-    parser.add_argument('--audio-queue-size', type=int, default=50,
+                        default=50, help="Internal queue size for video frames.")
+    parser.add_argument('--audio-queue-size', type=int, default=500,
                         help="Internal queue size for audio packets.")
 
     args = parser.parse_args()
@@ -125,6 +147,7 @@ def main():
                         format='[%(levelname)s] %(message)s')
 
     # --- Initialize Queues ---
+    # These are multiprocessing queues to get data from capture processes
     video_queue = Queue(maxsize=args.video_queue_size)
     audio_queue = Queue(maxsize=args.audio_queue_size)
 
@@ -134,20 +157,38 @@ def main():
 
     @sock.route('/stream')
     def stream(ws):
-        log_msg = f"New client connected: {ws.environ.get('REMOTE_ADDR')}"
-        logging.info(log_msg)
+        client_id = id(ws)
+        # Standard threading queue for this client
+        client_queue = queue.Queue(maxsize=100)
+
+        sender_thread = Thread(
+            target=client_sender_thread, args=(ws, client_queue))
+        sender_thread.daemon = True
+
         with clients_lock:
-            clients.append(ws)
+            clients[client_id] = {
+                'queue': client_queue, 'thread': sender_thread}
+
+        logging.info(f"New client connected: {client_id}")
+        sender_thread.start()
+
         try:
+            # This loop will be broken when the client disconnects,
+            # causing ws.receive() to raise an exception.
             while True:
                 ws.receive()
         except Exception as e:
-            logging.info(
-                f"Connection closed for {ws.environ.get('REMOTE_ADDR')}: {e}")
+            logging.info(f"Client {client_id} connection closed or error: {e}")
         finally:
+            logging.info(f"Client {client_id} disconnected.")
             with clients_lock:
-                if ws in clients:
-                    clients.remove(ws)
+                if client_id in clients:
+                    # Signal the sender thread to terminate
+                    try:
+                        clients[client_id]['queue'].put_nowait(None)
+                    except queue.Full:
+                        pass  # If queue is full, thread will eventually timeout and exit
+                    del clients[client_id]
 
     # --- Start background processes and threads ---
     if video:
@@ -166,8 +207,10 @@ def main():
                 "Audio module not available. Audio components not started.")
 
     # Start the unified broadcaster thread
-    Thread(target=broadcast_thread, args=(
-        video_queue, audio_queue, args.video_queue_size, args.audio_queue_size), daemon=True).start()
+    # This thread now fans out messages to individual client queues
+    broadcaster = Thread(target=broadcast_thread, args=(
+        video_queue, audio_queue), daemon=True)
+    broadcaster.start()
 
     logging.info(f"Server starting on http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, threaded=True)
