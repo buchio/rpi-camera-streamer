@@ -79,15 +79,24 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-def draw_overlay(frame, message=None):
+def draw_overlay(frame, message=None, width=None, height=None):
     c1 = (0, 0, 0)
     c2 = (255, 255, 255)
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 1
     t1 = 5
     t2 = 2
+    
+    if width is None or height is None:
+        height, width, _ = frame.shape
+
     timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    ts_pos = (260, 470)
+    (text_width, text_height), _ = cv2.getTextSize(timestamp, font, scale, t1)
+    
+    # Adjust position to be in the bottom-right corner
+    margin = 10
+    ts_pos = (width - text_width - margin, height - text_height + margin)
+
     cv2.putText(frame, timestamp, ts_pos, font, scale, c1, t1)
     cv2.putText(frame, timestamp, ts_pos, font, scale, c2, t2)
     if message:
@@ -99,8 +108,11 @@ def draw_overlay(frame, message=None):
 
 def rpi_draw_timestamp_callback(request):
     message = request.picam2.stream_message
+    config = request.picam2.stream_configuration()
+    width = config['main']['size'][0]
+    height = config['main']['size'][1]
     with MappedArray(request, 'main') as m:
-        draw_overlay(m.array, message)
+        draw_overlay(m.array, message, width, height)
 
 def start_rpi_camera(output, args):
     if not PICAMERA2_AVAILABLE:
@@ -142,7 +154,7 @@ def usb_capture_loop(output, args):
             print("Error: Could not read frame from USB camera.")
             continue
 
-        draw_overlay(frame, args.message)
+        draw_overlay(frame, args.message, args.width, args.height)
 
         ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), args.quality])
         if ret:
