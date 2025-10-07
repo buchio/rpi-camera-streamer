@@ -53,6 +53,6 @@ def audio_capture_process(args, audio_queue):
         else:
             logging.warning("Audio queue full, dropping audio frame.")
 
-    with sd.InputStream(samplerate=samplerate, channels=channels, dtype='int16', blocksize=blocksize, callback=callback):
+    with sd.InputStream(device=args.audio_device, samplerate=samplerate, channels=channels, dtype='int16', blocksize=blocksize, callback=callback):
         while True:
             time.sleep(10)
