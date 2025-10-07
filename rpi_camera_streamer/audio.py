@@ -29,7 +29,14 @@ def audio_capture_process(args, audio_queue):
         logging.warning(f"Failed to set audio process priority: {e}")
 
     try:
-        device_info = sd.query_devices(args.audio_device, 'input')
+        device_id = args.audio_device
+        if device_id is None:
+            # If no device is specified, use the default input device
+            device_id = sd.default.device[0]
+            logging.info(
+                f"No audio device specified, using default input device index: {device_id}")
+
+        device_info = sd.query_devices(device_id, 'input')
         if args.audio_samplerate is None:
             samplerate = int(device_info['default_samplerate'])
             logging.info(f"Using default sample rate: {samplerate} Hz")
@@ -53,6 +60,6 @@ def audio_capture_process(args, audio_queue):
         else:
             logging.warning("Audio queue full, dropping audio frame.")
 
-    with sd.InputStream(device=args.audio_device, samplerate=samplerate, channels=channels, dtype='int16', blocksize=blocksize, callback=callback):
+    with sd.InputStream(device=device_id, samplerate=samplerate, channels=channels, dtype='int16', blocksize=blocksize, callback=callback):
         while True:
             time.sleep(10)
