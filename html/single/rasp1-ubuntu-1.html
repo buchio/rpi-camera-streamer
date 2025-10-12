@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nginx Live Stream</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #222; }
+        video { width: 80%; max-width: 960px; background-color: #000; }
+    </style>
+</head>
+<body>
+    
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
+    <video id="video" controls></video>
+    <script>
+        // 再生したいHLSストリームのURL
+        // <サーバーIP>と<ストリームキー>の部分を自分の環境に合わせて変更してください
+        var streamUrl = 'http://rasp4-ubuntu-1.local:8080/live/rasp1-ubuntu-1.m3u8';
+
+        var video = document.getElementById('video');
+        
+        if (Hls.isSupported()) {
+            var hls = new Hls();
+            hls.loadSource(streamUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                video.play();
+            });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = streamUrl;
+            video.addEventListener('loadedmetadata', function() {
+                video.play();
+            });
+        }
+    </script>
+
+</body>
+</html>
