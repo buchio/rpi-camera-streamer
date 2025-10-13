@@ -108,11 +108,9 @@ def draw_overlay(frame, message=None, width=None, height=None):
 
 def rpi_draw_timestamp_callback(request):
     message = request.picam2.stream_message
-    config = request.picam2.stream_configuration()
-    width = config['main']['size'][0]
-    height = config['main']['size'][1]
     with MappedArray(request, 'main') as m:
-        draw_overlay(m.array, message, width, height)
+        # widthとheightを渡さず、draw_overlay関数内でフレームのshapeから取得させる
+        draw_overlay(m.array, message)
 
 def start_rpi_camera(output, args):
     if not PICAMERA2_AVAILABLE:
