@@ -4,17 +4,15 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-# このサービスを実行するユーザー名を指定してください
-# 例: User=pi
-User=__USER__
+User=buchio
 
 # rpi-camera-streamer.sh が存在するディレクトリの絶対パスを指定してください
 # 例: WorkingDirectory=/home/pi/rpi-camera-streamer
-WorkingDirectory=__PATH_TO_PROJECT__
+WorkingDirectory=/home/buchio/rpi-camera-streamer/ffmpeg
 
 # rpi-camera-streamer.sh の絶対パスを指定してください
 # 例: ExecStart=/home/pi/rpi-camera-streamer/rpi-camera-streamer.sh
-ExecStart=__PATH_TO_PROJECT__/rpi-camera-streamer.sh
+ExecStart=/home/buchio/rpi-camera-streamer/ffmpeg/rpi-camera-streamer.sh
 
 Restart=always
 RestartSec=10
