@@ -8,8 +8,35 @@ import time
 from http import server
 from threading import Condition, Thread
 from datetime import datetime
+import os
 
 import cv2
+
+# --- Image Saver Thread ---
+
+def image_saver_loop(output, save_dir, interval):
+    """Periodically saves the latest frame from the output to a file."""
+    if not os.path.exists(save_dir):
+        print(f"Creating snapshot directory: {save_dir}")
+        os.makedirs(save_dir)
+    
+    while True:
+        time.sleep(interval)
+        try:
+            with output.condition:
+                output.condition.wait()
+                frame = output.frame
+            
+            if frame:
+                filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S.jpg")
+                filepath = os.path.join(save_dir, filename)
+                with open(filepath, 'wb') as f:
+                    f.write(frame)
+                logging.info(f"Saved snapshot to {filepath}")
+
+        except Exception as e:
+            logging.error(f"Error saving snapshot: {e}")
+
 
 # Conditional imports for picamera2
 try:
@@ -175,6 +202,8 @@ if __name__ == '__main__':
     parser.add_argument('--quality', type=int, default=70, help='JPEG quality (1-100).')
     parser.add_argument('--device-id', type=int, default=0, help='USB camera device ID.')
     parser.add_argument('--message', type=str, default='Camera Stream', help='Message to display on stream.')
+    parser.add_argument('--save-dir', type=str, default=None, help='Directory to save snapshot images.')
+    parser.add_argument('--save-interval', type=int, default=60, help='Interval in seconds to save snapshot images.')
     args = parser.parse_args()
 
     output = StreamingOutput()
@@ -187,6 +216,11 @@ if __name__ == '__main__':
         args.message = args.message if args.message != 'Camera Stream' else 'USB Camera'
         capture_thread = Thread(target=usb_capture_loop, args=(output, args), daemon=True)
         capture_thread.start()
+
+    # Start the snapshot saver thread if a directory is specified
+    if args.save_dir:
+        saver_thread = Thread(target=image_saver_loop, args=(output, args.save_dir, args.save_interval), daemon=True)
+        saver_thread.start()
 
     try:
         # Get IP address
